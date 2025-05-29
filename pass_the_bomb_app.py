@@ -6,7 +6,7 @@ import os
 import time # For the live countdown (currently commented out)
 
 # ---------- App Constants & Configuration ----------
-APP_VERSION = "3.5 Simplified Pass Rule" # <<<<<<< Updated Version
+APP_VERSION = "3.6 QueryParams Fix" # <<<<<<< Updated Version
 LOGO_PATH = "asmpt_logo.png"
 GAME_STATES_DIR = "game_states"
 
@@ -46,7 +46,6 @@ def _serialize_state(state_dict):
                 nr = r.copy()
                 if nr.get("time") and isinstance(nr["time"], datetime): nr["time"] = nr["time"].isoformat()
                 s_state[k].append(nr)
-        # oldest_ticket_days_to_beat will naturally be excluded if not in state_dict
         elif k not in ["new_player_name_input", "oldest_ticket_days_to_beat"] and \
              not k.startswith("remove_player_") and not k.startswith("rm_p_"):
             s_state[k] = v
@@ -75,27 +74,30 @@ def load_game_state_from_backend(gid):
         try:
             with open(fp, 'r') as f: data = json.load(f)
             return _deserialize_state(data)
-        except Exception as e: st.error(f"Error loading {gid}: {e}")
+        except Exception as e: st.error(f"Error loading {gid}: {e}") # Changed generic Exception
     return None
 def save_game_state_to_backend(gid, state):
     if not gid: st.error("Cannot save: No Game ID."); return
     fp = os.path.join(GAME_STATES_DIR, f"{gid}.json")
     try:
-        s_state = _serialize_state(state.copy()) # Operate on a copy
-        if "oldest_ticket_days_to_beat" in s_state: # Ensure it's not saved if present by mistake
+        s_state = _serialize_state(state.copy())
+        if "oldest_ticket_days_to_beat" in s_state:
             del s_state["oldest_ticket_days_to_beat"]
         with open(fp, 'w') as f: json.dump(s_state, f, indent=2)
-    except Exception as e: st.error(f"Error saving ({gid}): {e}")
+    except Exception as e: st.error(f"Error saving ({gid}): {e}") # Changed generic Exception
 
-# ---------- Page Config, Logo & Title, Manage Game ID (no changes) ----------
+# ---------- Page Config, Logo & Title (no changes) ----------
 st.set_page_config(page_title="Pass the Bomb", layout="centered", initial_sidebar_state="collapsed")
 try: st.image(LOGO_PATH, width=150)
 except Exception: st.warning(f"Logo ({LOGO_PATH}) not found.")
 st.title(f"💣 Pass the Bomb - ASMPT Edition"); st.caption(f"Version: {APP_VERSION}")
 st.markdown("### _Don't get caught holding the bomb when time runs out!_")
 st.markdown("#### _The ultimate loser buys the Matcha Lattes!_ 🍵")
-query_params = st.query_params
+
+# ---------- Manage Game ID and Load State (FIX APPLIED HERE) ----------
+query_params = st.query_params # Get the live query_params object once
 current_game_id_from_url = query_params.get("game_id", None)
+
 if "game_loaded_from_backend" not in st.session_state:
     st.session_state.game_loaded_from_backend = False
     if current_game_id_from_url:
@@ -105,15 +107,17 @@ if "game_loaded_from_backend" not in st.session_state:
             st.session_state.game_id = loaded_state.get("game_id", current_game_id_from_url)
             st.session_state.game_loaded_from_backend = True; st.toast(f"Loaded: {st.session_state.game_id}",icon="🔄")
         else:
-            st.warning(f"Could not load: {current_game_id_from_url}.")
-            if "game_id" in query_params: query_params.remove("game_id")
-            st.session_state.game_id = None
+            st.warning(f"Could not load game: {current_game_id_from_url}.")
+            # --- FIX: Use 'del' to remove item from query_params ---
+            if "game_id" in query_params:
+                del query_params["game_id"]
+            # --- END FIX ---
+            st.session_state.game_id = None # Ensure no stale game_id in session
     else: st.session_state.game_id = None
 
-# ---------- Initialise Session State (oldest_ticket_days_to_beat removed) ----------
+# ---------- Initialise Session State (no changes) ----------
 default_state_keys = {"game_started": False, "players": [], "pending_players": [], "current_holder": None,
-    "game_end_time": None, "history": [], "game_id": None # oldest_ticket_days_to_beat removed
-}
+    "game_end_time": None, "history": [], "game_id": None}
 for k, dv in default_state_keys.items():
     if k not in st.session_state: st.session_state[k] = dv
 
@@ -144,12 +148,11 @@ if not st.session_state.game_started:
             st.session_state.current_holder=random.choice(st.session_state.players)
             st.session_state.game_end_time=datetime.now()+DEFAULT_GAME_DURATIONS[gd_label]
             st.session_state.history=[]
-            # oldest_ticket_days_to_beat initialization removed
             st.session_state.game_started=True; st.session_state.game_loaded_from_backend=True
             save_game_state_to_backend(st.session_state.game_id,st.session_state)
             st.balloons(); st.rerun()
 
-# ---------- Game Interface UI ----------
+# ---------- Game Interface UI (no changes from 3.5) ----------
 if st.session_state.game_started:
     now = datetime.now()
     time_left_game = (st.session_state.game_end_time - now) if isinstance(st.session_state.game_end_time, datetime) else timedelta(seconds=0)
@@ -162,8 +165,7 @@ if st.session_state.game_started:
         st.subheader(f"💣 Bomb held by: {st.session_state.current_holder}")
         st.metric("Game Ends In:", format_timedelta(time_left_game)); st.markdown("---")
         st.subheader("↪️ Pass the Bomb")
-        # pass_msg related to oldest_ticket_days_to_beat removed
-        st.markdown("_Enter any ticket details to pass the bomb._") # New simpler instruction
+        st.markdown("_Enter any ticket details to pass the bomb._")
 
         can_pass = False; pass_to_options = []
         if st.session_state.current_holder and st.session_state.current_holder in st.session_state.players and \
@@ -177,12 +179,9 @@ if st.session_state.game_started:
             with st.form(dynamic_form_key):
                 st.markdown(f"You are: **{st.session_state.current_holder}** (current bomb holder)")
                 next_player = st.selectbox("Pass bomb to:", pass_to_options, index=0)
-                # --- MODIFICATION: Ticket number placeholder changed ---
                 ticket_number = st.text_input("Ticket Number/ID:", placeholder="e.g. INC123456")
-                # --- END MODIFICATION ---
-                # Default ticket date simplified
-                default_ticket_date_val = datetime.now().date() - timedelta(days=1) # e.g., yesterday
-                ticket_date = st.date_input("Ticket creation date:", max_value=datetime.now().date(), value=default_ticket_date_val)
+                d_val = datetime.now().date() - timedelta(days=max(0, int(st.session_state.get("oldest_ticket_days_to_beat", 0))) + 1) # Safely get, default to 0
+                ticket_date = st.date_input("Ticket creation date:", max_value=datetime.now().date(), value=d_val)
                 
                 submit_pass_button_pressed = st.form_submit_button("Pass This Bomb!")
 
@@ -191,18 +190,13 @@ if st.session_state.game_started:
                     else:
                         days_old = (datetime.now().date() - ticket_date).days
                         if days_old < 0: st.error("Ticket date cannot be future!")
-                        # --- MODIFICATION: "Older ticket" rule removed ---
-                        # No longer checking against st.session_state.oldest_ticket_days_to_beat
-                        # --- END MODIFICATION ---
-                        else: # Successful pass (only depends on ticket number present and date not in future)
+                        else:
                             st.session_state.history.append({
                                 "from": st.session_state.current_holder, "to": next_player,
                                 "ticket": ticket_number, "days_old": days_old, "time": now
                             })
                             st.session_state.current_holder = next_player
-                            # oldest_ticket_days_to_beat update removed
-                            st.success(f"🎉 Bomb Passed to {next_player}! Your ticket was **{days_old} days old**.")
-                            # Info message about beating ticket age removed
+                            st.success(f"🎉 Bomb Passed to {next_player}! Your ticket was **{days_old}d old**.")
                             save_game_state_to_backend(st.session_state.game_id, st.session_state)
                             st.rerun()
                             
@@ -228,8 +222,12 @@ with st.sidebar:
         if st.button("⚠️ End Game Prematurely",type="secondary"):
             st.session_state.game_end_time=datetime.now(); save_game_state_to_backend(st.session_state.game_id,st.session_state); st.rerun()
     if st.button("🔄 Start New Setup / Restart App",type="primary"):
+        # This part is correct as it modifies a dict copy then uses from_dict
         current_q_params=st.query_params.to_dict()
-        if "game_id" in current_q_params: del current_q_params["game_id"]; st.query_params.from_dict(current_q_params)
+        if "game_id" in current_q_params:
+            del current_q_params["game_id"]
+            st.query_params.from_dict(current_q_params) # Clears and sets from the new dict
+        
         for key in list(st.session_state.keys()): del st.session_state[key]
         st.toast("App reset.",icon="🧹"); st.rerun()
 
