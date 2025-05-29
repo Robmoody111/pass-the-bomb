@@ -6,7 +6,7 @@ import os
 import time # For the live countdown (currently commented out)
 
 # ---------- App Constants & Configuration ----------
-APP_VERSION = "3.3 Minimal Button Test" # <<<<<<< Updated Version
+APP_VERSION = "3.4 Dynamic Form Key" # <<<<<<< Updated Version
 LOGO_PATH = "asmpt_logo.png"
 GAME_STATES_DIR = "game_states"
 
@@ -19,7 +19,7 @@ DEFAULT_GAME_DURATIONS = {
     "💼 Week (Office Hours)": timedelta(days=5),
 }
 
-# ---------- Helper Functions (そのまま) ----------
+# ---------- Helper Functions (no changes) ----------
 def format_timedelta(td):
     if td is None or td.total_seconds() < 0: return "0 seconds"
     total_seconds = int(td.total_seconds())
@@ -31,7 +31,7 @@ def format_timedelta(td):
     if total_seconds < 60 or not parts: parts.append(f"{seconds} second{'s' if seconds != 1 else ''}")
     return ", ".join(parts) if parts else "0 seconds"
 
-# ---------- Persistence Functions (そのまま) ----------
+# ---------- Persistence Functions (no changes) ----------
 if not os.path.exists(GAME_STATES_DIR):
     try: os.makedirs(GAME_STATES_DIR)
     except OSError as e: st.error(f"Could not create dir {GAME_STATES_DIR}: {e}.")
@@ -83,7 +83,7 @@ def save_game_state_to_backend(gid, state):
         with open(fp, 'w') as f: json.dump(s_state, f, indent=2)
     except Exception as e: st.error(f"Error saving ({gid}): {e}")
 
-# ---------- Page Config, Logo & Title, Manage Game ID, Initialise Session State (そのまま) ----------
+# ---------- Page Config, Logo & Title, Manage Game ID, Initialise Session State (no changes) ----------
 st.set_page_config(page_title="Pass the Bomb", layout="centered", initial_sidebar_state="collapsed")
 try: st.image(LOGO_PATH, width=150)
 except Exception: st.warning(f"Logo ({LOGO_PATH}) not found.")
@@ -110,7 +110,7 @@ default_state_keys = {"game_started": False, "players": [], "pending_players": [
 for k, dv in default_state_keys.items():
     if k not in st.session_state: st.session_state[k] = dv
 
-# ---------- Game Setup UI (そのまま) ----------
+# ---------- Game Setup UI (no changes) ----------
 if not st.session_state.game_started:
     st.subheader("🎮 Setup New Game")
     p_col1, p_col2 = st.columns(2)
@@ -164,17 +164,21 @@ if st.session_state.game_started:
              if pass_to_options: can_pass = True
         if not can_pass: st.error("Cannot pass bomb: No valid players to pass to.")
         else:
-            with st.form("pass_form"): # Line ~220 in this version
+            # --- MODIFICATION: Dynamic form key ---
+            # The form_key is now unique based on the number of passes made + current holder
+            # This forces Streamlit to treat it as a new form instance after each pass.
+            current_turn_identifier = len(st.session_state.get("history", []))
+            dynamic_form_key = f"pass_form_turn_{current_turn_identifier}_{st.session_state.current_holder}"
+            with st.form(dynamic_form_key):
+            # --- END MODIFICATION ---
                 st.markdown(f"You are: **{st.session_state.current_holder}** (current bomb holder)")
                 next_player = st.selectbox("Pass bomb to:", pass_to_options, index=0)
                 ticket_number = st.text_input("Ticket Number/ID:", placeholder="e.g. JIRA-123")
                 d_val = datetime.now().date() - timedelta(days=max(0, int(st.session_state.oldest_ticket_days_to_beat)) + 1)
                 ticket_date = st.date_input("Ticket creation date:", max_value=datetime.now().date(), value=d_val)
                 
-                # --- MODIFICATION: Simplest possible st.form_submit_button call ---
-                # This is line ~226 in this version
+                # Using the most basic submit button call
                 submit_pass_button_pressed = st.form_submit_button("Pass This Bomb!")
-                # --- END MODIFICATION ---
 
                 if submit_pass_button_pressed:
                     if not ticket_number.strip(): st.warning("⚠️ Enter ticket number.")
@@ -192,7 +196,8 @@ if st.session_state.game_started:
                             st.session_state.oldest_ticket_days_to_beat = max(st.session_state.oldest_ticket_days_to_beat, days_old)
                             st.success(f"🎉 Bomb Passed to {next_player}! Ticket: {days_old}d old.")
                             save_game_state_to_backend(st.session_state.game_id, st.session_state)
-                            st.rerun()
+                            st.rerun() # Rerun to reflect the pass and new form key
+                            
     st.markdown("---"); st.subheader("📊 Game Stats & History")
     with st.expander("📜 Bomb Pass History", expanded=True):
         if not st.session_state.history: st.caption("_No passes yet._")
@@ -201,7 +206,7 @@ if st.session_state.game_started:
                 t_val=r.get('time');t_str=t_val.strftime('%Y-%m-%d %H:%M:%S') if isinstance(t_val,datetime) else str(t_val)
                 st.markdown(f"-`{r.get('from','?')}`➡️`{r.get('to','?')}`(Tkt:`{r.get('ticket','?')}`–**{r.get('days_old','?')}d old**) at {t_str}")
 
-# ---------- Sidebar Controls (そのまま) ----------
+# ---------- Sidebar Controls (no changes) ----------
 with st.sidebar:
     st.header("⚙️ Game Controls")
     if st.session_state.game_id: st.markdown(f"**Game ID:** `{st.session_state.game_id}`"); st.caption("Share URL to join.")
@@ -220,7 +225,7 @@ with st.sidebar:
         for key in list(st.session_state.keys()): del st.session_state[key]
         st.toast("App reset.",icon="🧹"); st.rerun()
 
-# ---------- Footer (そのまま) ----------
+# ---------- Footer (no changes) ----------
 st.markdown("<br><hr><center><sub>Made for ASMPT · Powered by Streamlit & Matcha</sub></center>", unsafe_allow_html=True)
 
 # ---------- Live Timer Update (Still commented out for debugging) ----------
