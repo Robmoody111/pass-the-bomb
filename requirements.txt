@@ -1,2 +1,5 @@
 streamlit
-# Add other libraries if you use them, e.g., isodate for complex timedelta parsing
+# To try and force Python 3.11 for Streamlit Cloud deployment
+# (Check Streamlit Cloud docs for the currently supported way to pin Python)
+# One common way, though not universally guaranteed to be picked up over UI settings:
+# python~=3.11
