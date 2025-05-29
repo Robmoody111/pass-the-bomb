@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 st.set_page_config(page_title="Pass the Bomb", layout="centered")
 
 # ---------- Logo ----------
-st.image("asmpt_logo.png", width=200)  # Upload this to your repo alongside this .py file
+st.image("asmpt_logo.png", width=200)  # Upload this image to your GitHub repo
 
 # ---------- Title & Tagline ----------
 st.title("💣 Pass the Bomb - ASMPT Edition")
@@ -49,4 +49,66 @@ if not st.session_state.game_started:
             }
             st.session_state.players = st.session_state.pending_players
             st.session_state.current_holder = st.session_state.players[0]
-            st.session_state.bomb_timer = datetime.now() + timede
+            st.session_state.bomb_timer = datetime.now() + timedelta(seconds=60)
+            st.session_state.game_end = datetime.now() + duration_map[game_duration]
+            st.session_state.history = []
+            st.session_state.game_started = True
+            st.rerun()
+
+# ---------- Game Interface ----------
+if st.session_state.game_started:
+
+    time_left = int((st.session_state.bomb_timer - datetime.now()).total_seconds())
+    game_left = st.session_state.game_end - datetime.now()
+
+    if game_left.total_seconds() <= 0:
+        st.error("🏁 The game is over! Final bomb holder: " + st.session_state.current_holder)
+        if st.button("🔁 Restart Game"):
+            st.session_state.clear()
+            st.rerun()
+
+    elif time_left <= 0:
+        st.error(f"💥 BOOM! The bomb exploded in {st.session_state.current_holder}'s hands!")
+        if st.button("🔁 Restart Game"):
+            st.session_state.clear()
+            st.rerun()
+
+    else:
+        st.markdown(f"⏳ **Game ends in:** `{str(game_left).split('.')[0]}`")
+        st.info(f"💣 Held by: `{st.session_state.current_holder}` – ⏱ `{time_left}` seconds left to pass it")
+
+        st.subheader("Pass the Bomb")
+
+        with st.form("pass_form"):
+            your_name = st.selectbox("Who are you?", st.session_state.players)
+            next_player = st.selectbox("Pass the bomb to:", [p for p in st.session_state.players if p != your_name])
+            ticket_number = st.text_input("Enter any ticket number (for fun!) to pass the bomb")
+            ticket_date = st.date_input("What date was the ticket created?", max_value=datetime.now().date())
+            submit = st.form_submit_button("Pass it!")
+
+            if submit:
+                if your_name != st.session_state.current_holder:
+                    st.warning("You don't have the bomb!")
+                else:
+                    days_old = (datetime.now().date() - ticket_date).days
+                    st.session_state.history.append({
+                        "from": your_name,
+                        "to": next_player,
+                        "ticket": ticket_number,
+                        "days_old": days_old,
+                        "time": datetime.now().isoformat()
+                    })
+                    st.session_state.current_holder = next_player
+                    st.session_state.bomb_timer = datetime.now() + timedelta(seconds=60)
+                    st.success(f"🎉 Congrats! That ticket was **{days_old} days old**.")
+                    st.info(f"💣 It's now **{next_player}**'s turn!")
+
+        with st.expander("📜 Bomb Pass History"):
+            for record in reversed(st.session_state.history):
+                st.markdown(
+                    f"- `{record['from']}` ➡️ `{record['to']}` "
+                    f"(Ticket: `{record['ticket']}` – {record['days_old']} days old)"
+                )
+
+# ---------- Footer ----------
+st.markdown("<br><center><sub>Made for ASMPT · Powered by Streamlit</sub></center>", unsafe_allow_html=True)
