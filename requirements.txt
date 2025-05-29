@@ -1,5 +1,7 @@
 streamlit
-# To try and force Python 3.11 for Streamlit Cloud deployment
-# (Check Streamlit Cloud docs for the currently supported way to pin Python)
-# One common way, though not universally guaranteed to be picked up over UI settings:
+google-api-python-client
+google-auth-oauthlib
+google-auth-httplib2
+
+# Optional, but recommended for Streamlit Cloud:
 # python~=3.11
