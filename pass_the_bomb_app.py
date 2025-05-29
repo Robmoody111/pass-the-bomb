@@ -29,12 +29,11 @@ if not st.session_state.game_started:
 
     st.subheader("🎮 Start a New Game")
 
-    name = st.text_input("Enter player name", key="name_input")
-    if st.button("➕ Add Player"):
-        if name.strip():
-            st.session_state.pending_players.append(name.strip())
-            st.session_state.name_input = ""
-            st.experimental_rerun()
+    name = st.text_input("Enter player name")
+if st.button("➕ Add Player"):
+    if name.strip():
+        st.session_state.pending_players.append(name.strip())
+        st.experimental_rerun()
 
     if st.session_state.pending_players:
         st.markdown("**Players Added:**")
