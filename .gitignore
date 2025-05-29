@@ -41,3 +41,12 @@ logs/
 # Temporary files
 *.tmp
 *.temp
+
+
+# Service account keys / credentials
+*.json # Be careful if you have other JSON files you WANT to commit
+service-account-key.json # Or the specific name of your downloaded key file
+*.pem
+
+# Streamlit secrets if stored locally (for local testing)
+.streamlit/secrets.toml
