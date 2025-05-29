@@ -58,3 +58,186 @@ def _deserialize_state(json_data):
             try: d_state[k] = datetime.fromisoformat(v); continue
             except (TypeError, ValueError): pass
         if k == "history" and isinstance(v, list):
+            d_state[k] = []
+            for r_dict in v:
+                if isinstance(r_dict, dict):
+                    nr = r_dict.copy()
+                    if nr.get("time") and isinstance(nr["time"], str):
+                        try: nr["time"] = datetime.fromisoformat(nr["time"])
+                        except (TypeError, ValueError): pass
+                    d_state[k].append(nr)
+                else: st.warning(f"Skipping non-dict in '{k}': {r_dict}")
+    return d_state
+def load_game_state_from_backend(gid):
+    if not gid: return None
+    fp = os.path.join(GAME_STATES_DIR, f"{gid}.json")
+    if os.path.exists(fp):
+        try:
+            with open(fp, 'r') as f: data = json.load(f)
+            return _deserialize_state(data)
+        except Exception as e: st.error(f"Error loading {gid}: {e}")
+    return None
+def save_game_state_to_backend(gid, state):
+    if not gid: st.error("Cannot save: No Game ID."); return
+    fp = os.path.join(GAME_STATES_DIR, f"{gid}.json")
+    try:
+        s_state = _serialize_state(state.copy()) # Operate on a copy
+        if "oldest_ticket_days_to_beat" in s_state: # Ensure it's not saved if present by mistake
+            del s_state["oldest_ticket_days_to_beat"]
+        with open(fp, 'w') as f: json.dump(s_state, f, indent=2)
+    except Exception as e: st.error(f"Error saving ({gid}): {e}")
+
+# ---------- Page Config, Logo & Title, Manage Game ID (no changes) ----------
+st.set_page_config(page_title="Pass the Bomb", layout="centered", initial_sidebar_state="collapsed")
+try: st.image(LOGO_PATH, width=150)
+except Exception: st.warning(f"Logo ({LOGO_PATH}) not found.")
+st.title(f"💣 Pass the Bomb - ASMPT Edition"); st.caption(f"Version: {APP_VERSION}")
+st.markdown("### _Don't get caught holding the bomb when time runs out!_")
+st.markdown("#### _The ultimate loser buys the Matcha Lattes!_ 🍵")
+query_params = st.query_params
+current_game_id_from_url = query_params.get("game_id", None)
+if "game_loaded_from_backend" not in st.session_state:
+    st.session_state.game_loaded_from_backend = False
+    if current_game_id_from_url:
+        loaded_state = load_game_state_from_backend(current_game_id_from_url)
+        if loaded_state:
+            for k, v in loaded_state.items(): st.session_state[k] = v
+            st.session_state.game_id = loaded_state.get("game_id", current_game_id_from_url)
+            st.session_state.game_loaded_from_backend = True; st.toast(f"Loaded: {st.session_state.game_id}",icon="🔄")
+        else:
+            st.warning(f"Could not load: {current_game_id_from_url}.")
+            if "game_id" in query_params: query_params.remove("game_id")
+            st.session_state.game_id = None
+    else: st.session_state.game_id = None
+
+# ---------- Initialise Session State (oldest_ticket_days_to_beat removed) ----------
+default_state_keys = {"game_started": False, "players": [], "pending_players": [], "current_holder": None,
+    "game_end_time": None, "history": [], "game_id": None # oldest_ticket_days_to_beat removed
+}
+for k, dv in default_state_keys.items():
+    if k not in st.session_state: st.session_state[k] = dv
+
+# ---------- Game Setup UI (no changes) ----------
+if not st.session_state.game_started:
+    st.subheader("🎮 Setup New Game")
+    p_col1, p_col2 = st.columns(2)
+    with p_col1:
+        with st.form("add_players_form", clear_on_submit=True):
+            name = st.text_input("Enter player name", key="new_player_name_input")
+            add_p_submitted = st.form_submit_button("➕ Add Player")
+            if add_p_submitted and name.strip():
+                if name.strip() not in st.session_state.pending_players: st.session_state.pending_players.append(name.strip())
+                else: st.warning(f"{name.strip()} already in list.")
+    with p_col2:
+        if st.session_state.pending_players:
+            st.markdown("**Players to Add:**")
+            for i, pn in enumerate(list(st.session_state.pending_players)):
+                rc1,rc2=st.columns([.8,.2]); rc1.markdown(f"- {pn}")
+                if rc2.button("❌",key=f"rm_p_{pn}_{i}",help=f"Remove {pn}"): st.session_state.pending_players.pop(i); st.rerun()
+        else: st.markdown("_No players added._")
+    gd_label = st.selectbox("Game duration:",options=list(DEFAULT_GAME_DURATIONS.keys()),index=2)
+    if len(st.session_state.pending_players) < 2: st.info("Add at least 2 players.")
+    else:
+        if st.button("✅ Start Game",type="primary",use_container_width=True):
+            if not st.session_state.game_id: st.session_state.game_id=generate_game_id(); query_params["game_id"]=st.session_state.game_id
+            st.session_state.players=list(st.session_state.pending_players); st.session_state.pending_players=[]
+            st.session_state.current_holder=random.choice(st.session_state.players)
+            st.session_state.game_end_time=datetime.now()+DEFAULT_GAME_DURATIONS[gd_label]
+            st.session_state.history=[]
+            # oldest_ticket_days_to_beat initialization removed
+            st.session_state.game_started=True; st.session_state.game_loaded_from_backend=True
+            save_game_state_to_backend(st.session_state.game_id,st.session_state)
+            st.balloons(); st.rerun()
+
+# ---------- Game Interface UI ----------
+if st.session_state.game_started:
+    now = datetime.now()
+    time_left_game = (st.session_state.game_end_time - now) if isinstance(st.session_state.game_end_time, datetime) else timedelta(seconds=0)
+
+    if time_left_game.total_seconds() <= 0: # Game Over
+        st.error(f"🏁 **GAME OVER!** 🏁"); st.subheader(f"Final bomb holder: **{st.session_state.current_holder}**")
+        st.warning(f"**{st.session_state.current_holder}** buys Matcha Lattes! 🍵"); st.balloons()
+        save_game_state_to_backend(st.session_state.game_id, st.session_state)
+    else: # Gameplay Active
+        st.subheader(f"💣 Bomb held by: {st.session_state.current_holder}")
+        st.metric("Game Ends In:", format_timedelta(time_left_game)); st.markdown("---")
+        st.subheader("↪️ Pass the Bomb")
+        # pass_msg related to oldest_ticket_days_to_beat removed
+        st.markdown("_Enter any ticket details to pass the bomb._") # New simpler instruction
+
+        can_pass = False; pass_to_options = []
+        if st.session_state.current_holder and st.session_state.current_holder in st.session_state.players and \
+           isinstance(st.session_state.players, list) and len(st.session_state.players) >= 2:
+             pass_to_options = [p for p in st.session_state.players if p != st.session_state.current_holder]
+             if pass_to_options: can_pass = True
+        if not can_pass: st.error("Cannot pass bomb: No valid players to pass to.")
+        else:
+            current_turn_identifier = len(st.session_state.get("history", []))
+            dynamic_form_key = f"pass_form_turn_{current_turn_identifier}_{st.session_state.current_holder}"
+            with st.form(dynamic_form_key):
+                st.markdown(f"You are: **{st.session_state.current_holder}** (current bomb holder)")
+                next_player = st.selectbox("Pass bomb to:", pass_to_options, index=0)
+                # --- MODIFICATION: Ticket number placeholder changed ---
+                ticket_number = st.text_input("Ticket Number/ID:", placeholder="e.g. INC123456")
+                # --- END MODIFICATION ---
+                # Default ticket date simplified
+                default_ticket_date_val = datetime.now().date() - timedelta(days=1) # e.g., yesterday
+                ticket_date = st.date_input("Ticket creation date:", max_value=datetime.now().date(), value=default_ticket_date_val)
+                
+                submit_pass_button_pressed = st.form_submit_button("Pass This Bomb!")
+
+                if submit_pass_button_pressed:
+                    if not ticket_number.strip(): st.warning("⚠️ Enter ticket number.")
+                    else:
+                        days_old = (datetime.now().date() - ticket_date).days
+                        if days_old < 0: st.error("Ticket date cannot be future!")
+                        # --- MODIFICATION: "Older ticket" rule removed ---
+                        # No longer checking against st.session_state.oldest_ticket_days_to_beat
+                        # --- END MODIFICATION ---
+                        else: # Successful pass (only depends on ticket number present and date not in future)
+                            st.session_state.history.append({
+                                "from": st.session_state.current_holder, "to": next_player,
+                                "ticket": ticket_number, "days_old": days_old, "time": now
+                            })
+                            st.session_state.current_holder = next_player
+                            # oldest_ticket_days_to_beat update removed
+                            st.success(f"🎉 Bomb Passed to {next_player}! Your ticket was **{days_old} days old**.")
+                            # Info message about beating ticket age removed
+                            save_game_state_to_backend(st.session_state.game_id, st.session_state)
+                            st.rerun()
+                            
+    st.markdown("---"); st.subheader("📊 Game Stats & History")
+    with st.expander("📜 Bomb Pass History", expanded=True):
+        if not st.session_state.history: st.caption("_No passes yet._")
+        else:
+            for r in reversed(st.session_state.history):
+                t_val=r.get('time');t_str=t_val.strftime('%Y-%m-%d %H:%M:%S') if isinstance(t_val,datetime) else str(t_val)
+                st.markdown(f"-`{r.get('from','?')}`➡️`{r.get('to','?')}`(Tkt:`{r.get('ticket','?')}`–**{r.get('days_old','?')}d old**) at {t_str}")
+
+# ---------- Sidebar Controls (no changes) ----------
+with st.sidebar:
+    st.header("⚙️ Game Controls")
+    if st.session_state.game_id: st.markdown(f"**Game ID:** `{st.session_state.game_id}`"); st.caption("Share URL to join.")
+    else: st.caption("Start new game or use Game ID URL.")
+    if st.session_state.game_started:
+        st.subheader("Players:")
+        if st.session_state.players:
+            for p in st.session_state.players: st.markdown(f"- **{p}** {'💣' if p==st.session_state.current_holder else ''}")
+        else: st.caption("_No players._")
+        st.markdown("---")
+        if st.button("⚠️ End Game Prematurely",type="secondary"):
+            st.session_state.game_end_time=datetime.now(); save_game_state_to_backend(st.session_state.game_id,st.session_state); st.rerun()
+    if st.button("🔄 Start New Setup / Restart App",type="primary"):
+        current_q_params=st.query_params.to_dict()
+        if "game_id" in current_q_params: del current_q_params["game_id"]; st.query_params.from_dict(current_q_params)
+        for key in list(st.session_state.keys()): del st.session_state[key]
+        st.toast("App reset.",icon="🧹"); st.rerun()
+
+# ---------- Footer (no changes) ----------
+st.markdown("<br><hr><center><sub>Made for ASMPT · Powered by Streamlit & Matcha</sub></center>", unsafe_allow_html=True)
+
+# ---------- Live Timer Update (Still commented out) ----------
+# if st.session_state.get("game_started", False) and isinstance(st.session_state.get("game_end_time"), datetime):
+#     if st.session_state.game_end_time > datetime.now():
+#         time.sleep(1)
+#         st.rerun()
