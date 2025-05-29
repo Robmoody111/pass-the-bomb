@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 st.set_page_config(page_title="Pass the Bomb", layout="centered")
 
 # ---------- Logo ----------
-st.image("asmpt_logo.png", width=200)  # assumes you've uploaded this to your repo
+st.image("asmpt_logo.png", width=200)  # Upload this to your repo
 
 # ---------- Title & Tagline ----------
 st.title("💣 Pass the Bomb - ASMPT Edition")
@@ -21,28 +21,44 @@ if "game_started" not in st.session_state:
     st.session_state.bomb_timer = None
     st.session_state.game_end = None
     st.session_state.history = []
+    st.session_state.name_input = ""
+    st.session_state.pending_players = []
 
 # ---------- Game Setup ----------
 if not st.session_state.game_started:
+
     st.subheader("🎮 Start a New Game")
 
-    player_names = st.text_area("Enter player names (one per line)").strip().splitlines()
+    name = st.text_input("Enter player name", key="name_input")
+    if st.button("➕ Add Player"):
+        if name.strip():
+            st.session_state.pending_players.append(name.strip())
+            st.session_state.name_input = ""
+            st.experimental_rerun()
+
+    if st.session_state.pending_players:
+        st.markdown("**Players Added:**")
+        for p in st.session_state.pending_players:
+            st.markdown(f"- {p}")
+
     game_duration = st.selectbox("Select game duration:", ["1 day", "1 week", "1 month"])
-    if st.button("Start Game"):
-        if player_names:
+
+    if len(st.session_state.pending_players) < 2:
+        st.info("Add at least **2 players** to start the game.")
+    else:
+        if st.button("✅ Start Game"):
             duration_map = {
                 "1 day": timedelta(days=1),
                 "1 week": timedelta(weeks=1),
                 "1 month": timedelta(days=30)
             }
-            st.session_state.players = player_names
-            st.session_state.current_holder = player_names[0]
+            st.session_state.players = st.session_state.pending_players
+            st.session_state.current_holder = st.session_state.players[0]
             st.session_state.bomb_timer = datetime.now() + timedelta(seconds=60)
             st.session_state.game_end = datetime.now() + duration_map[game_duration]
             st.session_state.history = []
             st.session_state.game_started = True
-        else:
-            st.warning("Please enter at least one player.")
+            st.experimental_rerun()
 
 # ---------- Game Interface ----------
 if st.session_state.game_started:
