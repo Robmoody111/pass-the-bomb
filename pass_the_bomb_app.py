@@ -228,8 +228,8 @@ with st.sidebar:
 # ---------- Footer (no changes) ----------
 st.markdown("<br><hr><center><sub>Made for ASMPT · Powered by Streamlit & Matcha</sub></center>", unsafe_allow_html=True)
 
-# ---------- Live Timer Update (Still commented out for debugging) ----------
-# if st.session_state.get("game_started", False) and isinstance(st.session_state.get("game_end_time"), datetime):
-#     if st.session_state.game_end_time > datetime.now():
-#         time.sleep(1)
-#         st.rerun()
+# ---------- Live Timer Update ----------
+if st.session_state.get("game_started", False) and isinstance(st.session_state.get("game_end_time"), datetime):
+    if st.session_state.game_end_time > datetime.now():
+        time.sleep(1)
+        st.rerun()
