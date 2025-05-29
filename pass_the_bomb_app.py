@@ -2,7 +2,6 @@ import streamlit as st
 from datetime import datetime, timedelta
 import random
 import json
-# import os # No longer needed for local file game state persistence
 import time # For the live countdown (currently commented out)
 
 # Google Drive API imports
@@ -17,9 +16,8 @@ st.set_page_config(page_title="Pass the Bomb", layout="centered", initial_sideba
 # --- END st.set_page_config() ---
 
 # ---------- App Constants & Configuration ----------
-APP_VERSION = "4.4 Debug Secrets" # <<<<<<< Updated Version
-LOGO_PATH = "asmpt_logo.png"
-# GAME_STATES_DIR removed
+APP_VERSION = "4.5 Cleaned GDrive Persistence"
+LOGO_PATH = "asmpt_logo.png" # Ensure this image is in the same directory
 
 DEFAULT_GAME_DURATIONS = {
     "☕ Short (15 mins)": timedelta(minutes=15),
@@ -31,38 +29,11 @@ DEFAULT_GAME_DURATIONS = {
 }
 
 # ---------- Google Drive Service Initialization ----------
-# These will be populated by init_drive_service
 drive_service = None
 DRIVE_FOLDER_ID = None
 
-# Function to initialize Google Drive service (call once using cache_resource)
 @st.cache_resource # Cache the resource so it's initialized only once per session/worker
 def init_drive_service():
-    # --- TEMPORARY DEBUGGING ---
-    # These st.write calls will appear at the top of your app.
-    # They happen after set_page_config, so that part is fine.
-    st.write("--- Debugging Secrets (Attempting to Read) ---")
-    if "google_drive_folder_id" in st.secrets:
-        folder_id_from_secrets = st.secrets["google_drive_folder_id"]
-        st.write(f"Found 'google_drive_folder_id' in secrets. Value: '{folder_id_from_secrets}'")
-        st.write(f"Type of folder_id_from_secrets: {type(folder_id_from_secrets)}")
-    else:
-        st.write("'google_drive_folder_id' key was NOT found in st.secrets.") # More explicit message
-    
-    if "gcp_service_account" in st.secrets:
-        st.write("'gcp_service_account' key WAS found in st.secrets.")
-        gcp_secret_val = st.secrets["gcp_service_account"]
-        st.write(f"Type of gcp_service_account secret: {type(gcp_secret_val)}")
-        # If it's a dict-like object from a TOML table, it should have 'keys'
-        if hasattr(gcp_secret_val, 'keys'):
-            st.write(f"Top-level keys in gcp_service_account secret: {list(gcp_secret_val.keys())}")
-        else:
-            st.write(f"gcp_service_account secret is not dict-like. Value (first 100 chars): {str(gcp_secret_val)[:100]}")
-    else:
-        st.write("'gcp_service_account' key was NOT found in st.secrets.")
-    st.write("--- End Debugging Secrets ---")
-    # --- END TEMPORARY DEBUGGING ---
-
     gcp_service_account_secret = st.secrets.get("gcp_service_account")
     google_drive_folder_id_secret = st.secrets.get("google_drive_folder_id")
 
@@ -83,16 +54,10 @@ def init_drive_service():
                 scopes=['https://www.googleapis.com/auth/drive']
             )
             service = build('drive', 'v3', credentials=creds, cache_discovery=False)
-            # Optional: Test connection if service was built
-            # if service:
-            #    about_info = service.about().get(fields="user").execute()
-            #    st.success(f"Successfully connected to Drive as: {about_info['user']['emailAddress']}")
-
         except Exception as e:
             st.error(f"Failed to initialize Google Drive service: {e}")
             service = None 
             folder_id_val = None
-
     return service, folder_id_val
 
 drive_service, DRIVE_FOLDER_ID = init_drive_service()
@@ -168,7 +133,7 @@ def load_game_state_from_backend(game_id):
             fh = io.BytesIO()
             downloader = MediaIoBaseDownload(fh, request)
             done = False
-            while not done: status, done = downloader.next_chunk()
+            while not done: status, done = downloader.next_chunk() # pylint: disable=unused-variable
             game_state_json_str = fh.getvalue().decode('utf-8')
             game_data_dict = json.loads(game_state_json_str)
             return _deserialize_state(game_data_dict)
@@ -297,7 +262,7 @@ if st.session_state.game_started:
                 st.markdown(f"You are: **{st.session_state.current_holder}** (current bomb holder)")
                 next_player = st.selectbox("Pass bomb to:", pass_to_options, index=0)
                 ticket_number = st.text_input("Ticket Number/ID:", placeholder="e.g. INC123456")
-                old_ticket_val = st.session_state.get("oldest_ticket_days_to_beat", 0)
+                old_ticket_val = st.session_state.get("oldest_ticket_days_to_beat", 0) 
                 d_val = datetime.now().date() - timedelta(days=max(0, int(old_ticket_val)) + 1)
                 ticket_date = st.date_input("Ticket creation date:", max_value=datetime.now().date(), value=d_val)
                 submit_pass_button_pressed = st.form_submit_button("Pass This Bomb!")
