@@ -3,18 +3,41 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.egg-info/
+dist/
+build/
+*.so
+*.רותם
+
+# Virtual environments
 .env
+.venv
 venv/
-.venv/
+env/
+ENV/
 
 # Streamlit
 .streamlit/
-game_states/ # IMPORTANT: If you DON'T want to commit saved game states to GitHub
 
-# IDE specific
+# Game state data (runtime data, typically not version controlled)
+game_states/*.json
+# You might want to keep the empty game_states/ directory itself,
+# but ignore its JSON contents. If you want to ignore the directory entirely:
+# game_states/
+
+# IDE specific files
 .vscode/
 .idea/
+*.swp
+*~
 
-# OS specific
+# OS specific files
 .DS_Store
 Thumbs.db
+
+# Log files
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.temp
