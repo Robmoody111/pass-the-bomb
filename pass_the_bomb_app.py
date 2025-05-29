@@ -33,7 +33,7 @@ if not st.session_state.game_started:
 if st.button("➕ Add Player"):
     if name.strip():
         st.session_state.pending_players.append(name.strip())
-        st.experimental_rerun()
+        st.rerun()
 
     if st.session_state.pending_players:
         st.markdown("**Players Added:**")
