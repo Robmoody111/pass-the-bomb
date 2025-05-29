@@ -3,109 +3,99 @@
 import streamlit as st
 from datetime import datetime, timedelta
 
-# ---------- Logo & Title ----------
+# ---------- Config ----------
 st.set_page_config(page_title="Pass the Bomb", layout="centered")
-st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/3/33/ASMPT_Logo_2023.svg/2560px-ASMPT_Logo_2023.svg.png", width=200)
+
+# ---------- Logo ----------
+st.image("asmpt_logo.png", width=200)  # assumes you've uploaded this to your repo
+
+# ---------- Title & Tagline ----------
 st.title("💣 Pass the Bomb - ASMPT Edition")
 st.markdown("### _Don't be the one who has to buy the Matcha Lattes... close the oldest ticket to pass the bomb!_")
 
-# ---------- Initialize Game State ----------
-if "state" not in st.session_state:
-    st.session_state.state = {
-        "players": [],
-        "current_holder": None,
-        "bomb_timer": None,
-        "history": [],
-        "active": False,
-        "game_end": None
-    }
-
-state = st.session_state.state
+# ---------- State ----------
+if "game_started" not in st.session_state:
+    st.session_state.game_started = False
+    st.session_state.players = []
+    st.session_state.current_holder = None
+    st.session_state.bomb_timer = None
+    st.session_state.game_end = None
+    st.session_state.history = []
 
 # ---------- Game Setup ----------
-if not state["active"]:
+if not st.session_state.game_started:
     st.subheader("🎮 Start a New Game")
 
     player_names = st.text_area("Enter player names (one per line)").strip().splitlines()
-
     game_duration = st.selectbox("Select game duration:", ["1 day", "1 week", "1 month"])
-    start_game = st.button("Start Game")
-
-    if start_game and player_names:
-        duration_map = {
-            "1 day": timedelta(days=1),
-            "1 week": timedelta(weeks=1),
-            "1 month": timedelta(days=30)
-        }
-        state["players"] = player_names
-        state["current_holder"] = player_names[0]
-        state["bomb_timer"] = datetime.now() + timedelta(seconds=60)
-        state["game_end"] = datetime.now() + duration_map[game_duration]
-        state["history"] = []
-        state["active"] = True
-        st.success(f"Game started! {player_names[0]} holds the bomb first.")
-    elif start_game:
-        st.warning("Please enter at least one player.")
-    st.stop()
-
-# ---------- Game Countdown ----------
-time_left = int((state["bomb_timer"] - datetime.now()).total_seconds())
-overall_time_left = state["game_end"] - datetime.now()
-if overall_time_left.total_seconds() <= 0:
-    state["active"] = False
-    st.error("🏁 The game is over! Final bomb holder: " + state["current_holder"])
-    st.button("🔁 Restart Game", on_click=lambda: st.session_state.clear())
-    st.stop()
-else:
-    st.markdown(f"⏳ **Game ends in:** `{str(overall_time_left).split('.')[0]}`")
-
-if time_left <= 0:
-    state["active"] = False
-    st.error(f"💥 BOOM! The bomb exploded in {state['current_holder']}'s hands!")
-    st.button("🔁 Restart Game", on_click=lambda: st.session_state.clear())
-    st.stop()
-else:
-    st.info(f"💣 Held by: `{state['current_holder']}` – ⏱ `{time_left}` seconds left to pass it")
-
-# ---------- Bomb Passing ----------
-st.subheader("Pass the Bomb")
-
-with st.form("pass_form"):
-    your_name = st.selectbox("Who are you?", state["players"])
-    next_player = st.selectbox("Who do you want to pass the bomb to?", [p for p in state["players"] if p != your_name])
-    ticket_number = st.text_input("Enter any ticket number (for fun!) to pass the bomb")
-    ticket_date = st.date_input("What date was the ticket created?", max_value=datetime.now().date())
-    submit = st.form_submit_button("Pass it!")
-
-    def is_ticket_closed(ticket_number):
-        return True  # All ticket numbers are valid in this version
-
-    if submit:
-        if your_name != state["current_holder"]:
-            st.warning("You don't have the bomb!")
-        elif not is_ticket_closed(ticket_number):
-            st.error("❌ Something went wrong. (This shouldn't happen!)")
+    if st.button("Start Game"):
+        if player_names:
+            duration_map = {
+                "1 day": timedelta(days=1),
+                "1 week": timedelta(weeks=1),
+                "1 month": timedelta(days=30)
+            }
+            st.session_state.players = player_names
+            st.session_state.current_holder = player_names[0]
+            st.session_state.bomb_timer = datetime.now() + timedelta(seconds=60)
+            st.session_state.game_end = datetime.now() + duration_map[game_duration]
+            st.session_state.history = []
+            st.session_state.game_started = True
         else:
-            days_old = (datetime.now().date() - ticket_date).days
-            state["history"].append({
-                "from": your_name,
-                "to": next_player,
-                "ticket": ticket_number,
-                "days_old": days_old,
-                "time": datetime.now().isoformat()
-            })
-            state["current_holder"] = next_player
-            state["bomb_timer"] = datetime.now() + timedelta(seconds=60)
-            st.success(f"🎉 Congratulations! You are closing a ticket that's **{days_old} days old**.")
-            st.info(f"💣 It's now **{next_player}**'s turn!")
+            st.warning("Please enter at least one player.")
 
-# ---------- History ----------
-with st.expander("📜 View Bomb Pass History"):
-    for record in reversed(state["history"]):
-        st.markdown(
-            f"- `{record['from']}` ➡️ `{record['to']}` "
-            f"(Ticket: `{record['ticket']}` – {record['days_old']} days old)"
-        )
+# ---------- Game Interface ----------
+if st.session_state.game_started:
+
+    # Time Remaining
+    time_left = int((st.session_state.bomb_timer - datetime.now()).total_seconds())
+    game_left = st.session_state.game_end - datetime.now()
+
+    if game_left.total_seconds() <= 0:
+        st.error("🏁 The game is over! Final bomb holder: " + st.session_state.current_holder)
+        if st.button("🔁 Restart Game"):
+            st.session_state.clear()
+    elif time_left <= 0:
+        st.error(f"💥 BOOM! The bomb exploded in {st.session_state.current_holder}'s hands!")
+        if st.button("🔁 Restart Game"):
+            st.session_state.clear()
+    else:
+        st.markdown(f"⏳ **Game ends in:** `{str(game_left).split('.')[0]}`")
+        st.info(f"💣 Held by: `{st.session_state.current_holder}` – ⏱ `{time_left}` seconds left to pass it")
+
+        # Bomb Passing
+        st.subheader("Pass the Bomb")
+        with st.form("pass_form"):
+            your_name = st.selectbox("Who are you?", st.session_state.players)
+            next_player = st.selectbox("Pass the bomb to:", [p for p in st.session_state.players if p != your_name])
+            ticket_number = st.text_input("Enter any ticket number (for fun!) to pass the bomb")
+            ticket_date = st.date_input("What date was the ticket created?", max_value=datetime.now().date())
+            submit = st.form_submit_button("Pass it!")
+
+            if submit:
+                if your_name != st.session_state.current_holder:
+                    st.warning("You don't have the bomb!")
+                else:
+                    days_old = (datetime.now().date() - ticket_date).days
+                    st.session_state.history.append({
+                        "from": your_name,
+                        "to": next_player,
+                        "ticket": ticket_number,
+                        "days_old": days_old,
+                        "time": datetime.now().isoformat()
+                    })
+                    st.session_state.current_holder = next_player
+                    st.session_state.bomb_timer = datetime.now() + timedelta(seconds=60)
+                    st.success(f"🎉 Congrats! That ticket was **{days_old} days old**.")
+                    st.info(f"💣 It's now **{next_player}**'s turn!")
+
+        # History
+        with st.expander("📜 Bomb Pass History"):
+            for record in reversed(st.session_state.history):
+                st.markdown(
+                    f"- `{record['from']}` ➡️ `{record['to']}` "
+                    f"(Ticket: `{record['ticket']}` – {record['days_old']} days old)"
+                )
 
 # ---------- Footer ----------
 st.markdown("<br><center><sub>Made for ASMPT · Powered by Streamlit</sub></center>", unsafe_allow_html=True)
