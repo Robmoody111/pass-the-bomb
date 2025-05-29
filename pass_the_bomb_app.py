@@ -1,3 +1,54 @@
+# Function to initialize Google Drive service (call once using cache_resource)
+@st.cache_resource 
+def init_drive_service():
+    # --- TEMPORARY DEBUGGING ---
+    st.write("--- Debugging Secrets ---")
+    if "google_drive_folder_id" in st.secrets:
+        folder_id_from_secrets = st.secrets["google_drive_folder_id"]
+        st.write(f"Found 'google_drive_folder_id' in secrets. Value: '{folder_id_from_secrets}'")
+        st.write(f"Type of folder_id_from_secrets: {type(folder_id_from_secrets)}")
+    else:
+        st.write("'google_drive_folder_id' NOT in st.secrets")
+    
+    if "gcp_service_account" in st.secrets:
+        st.write("'gcp_service_account' IS in st.secrets.")
+        # You could add more detailed checks for gcp_service_account if needed
+    else:
+        st.write("'gcp_service_account' NOT in st.secrets.")
+    st.write("--- End Debugging Secrets ---")
+    # --- END TEMPORARY DEBUGGING ---
+
+    gcp_service_account_secret = st.secrets.get("gcp_service_account")
+    google_drive_folder_id_secret = st.secrets.get("google_drive_folder_id")
+
+    service = None 
+    folder_id_val = None 
+
+    if not gcp_service_account_secret:
+        st.error("Google Drive credentials (gcp_service_account) not found in Streamlit Secrets.")
+    elif not google_drive_folder_id_secret: # This is the warning you were seeing
+        st.warning("Google Drive Folder ID (google_drive_folder_id) not found in Streamlit Secrets [get returned None/Falsey].") # Modified warning
+    else:
+        try:
+            creds_json = dict(gcp_service_account_secret) 
+            folder_id_val = str(google_drive_folder_id_secret) # Ensure it's a string
+            
+            creds = service_account.Credentials.from_service_account_info(
+                creds_json,
+                scopes=['https://www.googleapis.com/auth/drive']
+            )
+            service = build('drive', 'v3', credentials=creds, cache_discovery=False)
+            # Test the service with a simple call if possible, e.g., get about info
+            # about_info = service.about().get(fields="user").execute()
+            # st.write(f"Successfully connected to Drive as: {about_info['user']['emailAddress']}")
+
+        except Exception as e:
+            st.error(f"Failed to initialize Google Drive service: {e}")
+            service = None 
+            folder_id_val = None
+
+    return service, folder_id_val
+    
 import streamlit as st
 from datetime import datetime, timedelta
 import random
