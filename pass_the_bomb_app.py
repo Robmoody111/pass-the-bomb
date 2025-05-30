@@ -16,7 +16,7 @@ st.set_page_config(page_title="Pass the Bomb", layout="centered", initial_sideba
 # --- END st.set_page_config() ---
 
 # ---------- App Constants & Configuration ----------
-APP_VERSION = "5.1 Auto-Refresh Game State" # <<<<<<< Updated Version
+APP_VERSION = "5.2 Indentation Fix" # <<<<<<< Updated Version
 LOGO_PATH = "asmpt_logo.png"
 
 DEFAULT_GAME_DURATIONS = {
@@ -28,7 +28,6 @@ DEFAULT_GAME_DURATIONS = {
     "💼 Week (Office Hours)": timedelta(days=5),
 }
 
-# Define default_state_keys globally for access in load logic
 DEFAULT_STATE_KEYS = {"game_started": False, "players": [], "pending_players": [], "current_holder": None,
     "game_end_time": None, "history": [], "game_id": None}
 
@@ -55,7 +54,7 @@ def init_drive_service():
 
 drive_service, DRIVE_FOLDER_ID = init_drive_service()
 
-# ---------- Helper Functions (no changes) ----------
+# ---------- Helper Functions ----------
 def format_timedelta(td):
     if td is None or td.total_seconds() < 0: return "0 seconds"
     total_seconds = int(td.total_seconds())
@@ -66,18 +65,36 @@ def format_timedelta(td):
     if minutes: parts.append(f"{minutes} minute{'s' if minutes != 1 else ''}")
     if total_seconds < 60 or not parts: parts.append(f"{seconds} second{'s' if seconds != 1 else ''}")
     return ", ".join(parts) if parts else "0 seconds"
+
 def generate_game_id(): return "".join(random.choices("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", k=8))
+
+# --- MODIFIED _serialize_state function ---
 def _serialize_state(state_dict):
-    s_state = {};
+    s_state = {}
     for k, v in state_dict.items():
-        if isinstance(v, datetime): s_state[k] = v.isoformat()
+        if isinstance(v, datetime):
+            s_state[k] = v.isoformat()
         elif k == "history" and isinstance(v, list):
             s_state[k] = []
-            for r in v: nr = r.copy();
-                         if nr.get("time") and isinstance(nr["time"], datetime): nr["time"] = nr["time"].isoformat()
-                         s_state[k].append(nr)
-        elif k not in ["new_player_name_input"] and not k.startswith("remove_player_") and not k.startswith("rm_p_"): s_state[k] = v
+            for r_item in v: # Changed loop variable for clarity
+                # Ensure r_item is a dictionary before trying to copy
+                if isinstance(r_item, dict):
+                    nr = r_item.copy() 
+                    # Check if 'time' key exists and its value is a datetime object
+                    time_val = nr.get("time") # Get value safely
+                    if time_val and isinstance(time_val, datetime): # Check if it's datetime
+                        nr["time"] = time_val.isoformat()
+                    s_state[k].append(nr)
+                else:
+                    # If item in history is not a dict, append as is (might be already serialized or other data type)
+                    s_state[k].append(r_item) 
+        elif k not in ["new_player_name_input"] and \
+             not k.startswith("remove_player_") and \
+             not k.startswith("rm_p_"):
+            s_state[k] = v
     return s_state
+# --- END MODIFIED _serialize_state function ---
+
 def _deserialize_state(json_data):
     d_state = json_data.copy();
     for k, v in json_data.items():
@@ -96,7 +113,7 @@ def _deserialize_state(json_data):
                 else: st.warning(f"Skipping non-dict in '{k}': {r_dict}")
     return d_state
 
-# --- Google Drive Persistence Functions (no changes) ---
+# --- Google Drive Persistence Functions (no changes from 5.1) ---
 def find_file_in_drive(service, file_name, folder_id):
     if not service or not folder_id: return None
     query = f"name='{file_name}' and '{folder_id}' in parents and trashed=false"
@@ -108,6 +125,7 @@ def find_file_in_drive(service, file_name, folder_id):
         if e.resp.status != 404 : st.error(f"DRIVE API ERROR (find_file for {file_name}): {e.resp.status} - {e.content.decode()}")
         return None
     except Exception as e: st.error(f"UNEXPECTED ERROR (find_file for {file_name}): {e}"); return None
+
 def load_game_state_from_backend(game_id):
     if not drive_service or not DRIVE_FOLDER_ID or not game_id: return None
     file_name = f"{game_id}.json"
@@ -125,6 +143,7 @@ def load_game_state_from_backend(game_id):
         if e.resp.status != 404: st.error(f"DRIVE API ERROR (load_state for {game_id}): {e.resp.status} - {e.content.decode()}")
         return None
     except Exception as e: st.error(f"UNEXPECTED ERROR (load_state for {game_id}): {e}"); return None
+
 def save_game_state_to_backend(game_id, session_state_proxy):
     if not drive_service or not DRIVE_FOLDER_ID or not game_id:
         st.error("SAVE FAILED: Drive service not configured or no game_id."); return False
@@ -156,52 +175,29 @@ st.markdown("#### _The ultimate loser buys the Matcha Lattes!_ 🍵")
 
 query_params = st.query_params 
 
-# ---------- MODIFIED: Manage Game ID and Load State (Auto-Refresh Logic) ----------
+# ---------- Manage Game ID and Load State (no changes from 5.1) ----------
 if drive_service and DRIVE_FOLDER_ID:
     current_game_id_from_url = query_params.get("game_id", None)
-
     if current_game_id_from_url:
-        # If a game_id is in the URL, ALWAYS try to load its latest state.
-        # This will be triggered by the 1-second auto-refresh (and other reruns) for all viewers.
-        # st.write(f"Debug (ManageID - AutoRefresh): URL has game_id: {current_game_id_from_url}. Forcing load.") # Optional debug
         loaded_state = load_game_state_from_backend(current_game_id_from_url)
-        
         if loaded_state:
-            # Update session_state with the fresh data from GDrive
             for k, v in loaded_state.items():
-                # Only update if the key is part of our known game state
-                if k in DEFAULT_STATE_KEYS: # Use the globally defined DEFAULT_STATE_KEYS
-                     st.session_state[k] = v
-            
-            st.session_state.game_id = loaded_state.get("game_id", current_game_id_from_url) # Ensure game_id is set
-            st.session_state.game_started = loaded_state.get("game_started", False) # Ensure game_started is also updated
-            # st.toast(f"Auto-refreshed game: {st.session_state.game_id}", icon="🛰️") # Can be noisy
+                if k in DEFAULT_STATE_KEYS: st.session_state[k] = v
+            st.session_state.game_id = loaded_state.get("game_id", current_game_id_from_url)
+            st.session_state.game_started = loaded_state.get("game_started", False)
         else: 
-            # Game ID in URL but couldn't load (e.g., file deleted, or new invalid ID)
-            # If a game was previously active in this session but now can't be loaded, reset it.
             if st.session_state.get("game_id") == current_game_id_from_url:
                 st.warning(f"Could not auto-refresh game: {current_game_id_from_url}. It may no longer exist.")
-                st.session_state.game_started = False # Stop the current game in this session
-                # Clear the game_id from URL if it's invalid to prevent reload loops on a bad ID
+                st.session_state.game_started = False
                 if "game_id" in query_params: del query_params["game_id"]
                 st.session_state.game_id = None 
-            # If it was a different game_id or no game was active, just show setup
-            # (This else branch might not be strictly necessary if the below initialization handles it)
 
-# Initialize all expected session state keys if they haven't been set by a successful load
-# This ensures the app doesn't crash due to missing keys later on.
 for k, dv in DEFAULT_STATE_KEYS.items():
-    if k not in st.session_state:
-        st.session_state[k] = dv
-
-# If after all attempts, there's no valid game_id in session_state (e.g. bad URL param, failed load),
-# ensure game_started is False so setup screen shows.
-if not st.session_state.get("game_id"):
-    st.session_state.game_started = False
-# ---------- END MODIFIED: Manage Game ID and Load State ----------
+    if k not in st.session_state: st.session_state[k] = dv
+if not st.session_state.get("game_id"): st.session_state.game_started = False
 
 
-# ---------- Game Setup UI (no changes) ----------
+# ---------- Game Setup UI (no changes from 5.1) ----------
 if not st.session_state.game_started:
     st.subheader("🎮 Setup New Game")
     p_col1, p_col2 = st.columns(2)
@@ -237,7 +233,7 @@ if not st.session_state.game_started:
                 if save_successful: st.balloons(); st.rerun()
                 else: st.error("Failed to save initial game state."); st.rerun()
 
-# ---------- Game Interface UI (no changes) ----------
+# ---------- Game Interface UI (no changes from 5.1) ----------
 if st.session_state.game_started:
     now = datetime.now()
     time_left_game = (st.session_state.game_end_time - now) if isinstance(st.session_state.game_end_time, datetime) else timedelta(seconds=0)
@@ -291,7 +287,7 @@ if st.session_state.game_started:
                 t_val=r.get('time');t_str=t_val.strftime('%Y-%m-%d %H:%M:%S') if isinstance(t_val,datetime) else str(t_val)
                 st.markdown(f"-`{r.get('from','?')}`➡️`{r.get('to','?')}`(Tkt:`{r.get('ticket','?')}`–**{r.get('days_old','?')}d old**) at {t_str}")
 
-# ---------- Sidebar Controls (no changes) ----------
+# ---------- Sidebar Controls (no changes from 5.1) ----------
 with st.sidebar:
     st.header("⚙️ Game Controls")
     if st.session_state.game_id: st.markdown(f"**Game ID:** `{st.session_state.game_id}`"); st.caption("Share URL to join.")
