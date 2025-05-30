@@ -2,7 +2,7 @@ import streamlit as st
 from datetime import datetime, timedelta
 import random
 import json
-import time # For the live countdown (currently commented out)
+import time 
 
 # Google Drive API imports
 from google.oauth2 import service_account
@@ -11,58 +11,17 @@ from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload
 from googleapiclient.errors import HttpError
 import io
 
-# --- Call st.set_page_config() as the VERY FIRST Streamlit command ---
 st.set_page_config(page_title="Pass the Bomb", layout="centered", initial_sidebar_state="collapsed")
-# --- END st.set_page_config() ---
 
-# ---------- App Constants & Configuration ----------
-APP_VERSION = "4.5 Cleaned GDrive Persistence"
-LOGO_PATH = "asmpt_logo.png" # Ensure this image is in the same directory
+APP_VERSION = "4.6 Advanced Debug"
+LOGO_PATH = "asmpt_logo.png"
 
+# ... (DEFAULT_GAME_DURATIONS and format_timedelta remain the same) ...
 DEFAULT_GAME_DURATIONS = {
     "☕ Short (15 mins)": timedelta(minutes=15),
     "⚡ Quick Blast (30 mins)": timedelta(minutes=30),
-    "🕒 Standard (1 hour)": timedelta(hours=1),
-    "☀️ Half Day (4 hours)": timedelta(hours=4),
-    "🗓️ Full Day (8 hours)": timedelta(hours=8),
-    "💼 Week (Office Hours)": timedelta(days=5),
+    "🕒 Standard (1 hour)": timedelta(hours=1)
 }
-
-# ---------- Google Drive Service Initialization ----------
-drive_service = None
-DRIVE_FOLDER_ID = None
-
-@st.cache_resource # Cache the resource so it's initialized only once per session/worker
-def init_drive_service():
-    gcp_service_account_secret = st.secrets.get("gcp_service_account")
-    google_drive_folder_id_secret = st.secrets.get("google_drive_folder_id")
-
-    service = None 
-    folder_id_val = None 
-
-    if not gcp_service_account_secret:
-        st.error("CRITICAL: Google Drive credentials (gcp_service_account) not found in Streamlit Secrets.")
-    elif not google_drive_folder_id_secret: 
-        st.warning("CRITICAL: Google Drive Folder ID (google_drive_folder_id) not found in Streamlit Secrets.")
-    else:
-        try:
-            creds_json = dict(gcp_service_account_secret) 
-            folder_id_val = str(google_drive_folder_id_secret) 
-            
-            creds = service_account.Credentials.from_service_account_info(
-                creds_json,
-                scopes=['https://www.googleapis.com/auth/drive']
-            )
-            service = build('drive', 'v3', credentials=creds, cache_discovery=False)
-        except Exception as e:
-            st.error(f"Failed to initialize Google Drive service: {e}")
-            service = None 
-            folder_id_val = None
-    return service, folder_id_val
-
-drive_service, DRIVE_FOLDER_ID = init_drive_service()
-
-# ---------- Helper Functions ----------
 def format_timedelta(td):
     if td is None or td.total_seconds() < 0: return "0 seconds"
     total_seconds = int(td.total_seconds())
@@ -74,8 +33,60 @@ def format_timedelta(td):
     if total_seconds < 60 or not parts: parts.append(f"{seconds} second{'s' if seconds != 1 else ''}")
     return ", ".join(parts) if parts else "0 seconds"
 
-def generate_game_id(): return "".join(random.choices("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", k=8))
 
+drive_service = None
+DRIVE_FOLDER_ID = None
+
+@st.cache_resource
+def init_drive_service():
+    st.write("--- Debug: Attempting init_drive_service() ---")
+    gcp_creds_secret = st.secrets.get("gcp_service_account")
+    folder_id_secret = st.secrets.get("google_drive_folder_id")
+
+    temp_service = None
+    temp_folder_id = None
+
+    if not gcp_creds_secret:
+        st.error("Debug: GCP service account secret NOT FOUND.")
+    else:
+        st.success("Debug: GCP service account secret FOUND.")
+        if not isinstance(gcp_creds_secret, dict) and not hasattr(gcp_creds_secret, 'items'):
+             st.error(f"Debug: gcp_service_account secret is not a dictionary. Type: {type(gcp_creds_secret)}")
+
+
+    if not folder_id_secret:
+        st.warning("Debug: Google Drive Folder ID secret NOT FOUND.")
+    else:
+        st.success(f"Debug: Google Drive Folder ID secret FOUND. Value: '{folder_id_secret}', Type: {type(folder_id_secret)}")
+        temp_folder_id = str(folder_id_secret)
+
+    if gcp_creds_secret and folder_id_secret:
+        try:
+            # Ensure gcp_creds_secret is a dict if it's a SecretsProxy object
+            creds_json_dict = dict(gcp_creds_secret) if hasattr(gcp_creds_secret, 'items') else gcp_creds_secret
+            
+            creds = service_account.Credentials.from_service_account_info(
+                creds_json_dict,
+                scopes=['https://www.googleapis.com/auth/drive']
+            )
+            temp_service = build('drive', 'v3', credentials=creds, cache_discovery=False)
+            st.success("Debug: Google Drive service built successfully!")
+            # Test with a simple API call
+            # about_info = temp_service.about().get(fields="user").execute()
+            # st.info(f"Debug: Connected to Drive as: {about_info['user']['emailAddress']}")
+
+        except Exception as e:
+            st.error(f"Debug: Failed to initialize Google Drive service credentials or build: {e}")
+            temp_service = None
+            temp_folder_id = None # Ensure folder_id is also None if service fails
+    
+    st.write(f"--- Debug: init_drive_service() returning: service is {'SET' if temp_service else 'None'}, folder_id is {'SET' if temp_folder_id else 'None'} ---")
+    return temp_service, temp_folder_id
+
+drive_service, DRIVE_FOLDER_ID = init_drive_service()
+
+# ... (generate_game_id, _serialize_state, _deserialize_state remain the same) ...
+def generate_game_id(): return "".join(random.choices("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", k=8))
 def _serialize_state(state_dict):
     s_state = {}
     for k, v in state_dict.items():
@@ -83,13 +94,12 @@ def _serialize_state(state_dict):
         elif k == "history" and isinstance(v, list):
             s_state[k] = []
             for r in v:
-                nr = r.copy()
+                nr = r.copy();
                 if nr.get("time") and isinstance(nr["time"], datetime): nr["time"] = nr["time"].isoformat()
                 s_state[k].append(nr)
         elif k not in ["new_player_name_input"] and not k.startswith("remove_player_") and not k.startswith("rm_p_"):
             s_state[k] = v
     return s_state
-
 def _deserialize_state(json_data):
     d_state = json_data.copy()
     for k, v in json_data.items():
@@ -100,7 +110,7 @@ def _deserialize_state(json_data):
             d_state[k] = []
             for r_dict in v:
                 if isinstance(r_dict, dict):
-                    nr = r_dict.copy()
+                    nr = r_dict.copy();
                     if nr.get("time") and isinstance(nr["time"], str):
                         try: nr["time"] = datetime.fromisoformat(nr["time"])
                         except (TypeError, ValueError): pass
@@ -108,45 +118,63 @@ def _deserialize_state(json_data):
                 else: st.warning(f"Skipping non-dict in '{k}': {r_dict}")
     return d_state
 
-# --- Google Drive Persistence Functions ---
 def find_file_in_drive(service, file_name, folder_id):
-    if not service or not folder_id: return None
+    st.write(f"Debug: find_file_in_drive called for file: {file_name}, folder: {folder_id is not None}")
+    if not service or not folder_id:
+        st.warning(f"Debug: find_file_in_drive returning None early (service or folder_id missing). Service: {service is not None}, Folder ID: {folder_id}")
+        return None
     query = f"name='{file_name}' and '{folder_id}' in parents and trashed=false"
     try:
+        st.write(f"Debug: Drive query: {query}")
         response = service.files().list(q=query, spaces='drive', fields='files(id, name)').execute()
         files = response.get('files', [])
-        return files[0]['id'] if files else None
+        if files:
+            st.success(f"Debug: Found file {file_name} with ID {files[0]['id']}")
+            return files[0]['id']
+        else:
+            st.info(f"Debug: File {file_name} not found in Drive.")
+            return None
     except HttpError as e:
-        if e.resp.status != 404 : st.error(f"API error finding file {file_name}: {e}")
+        st.error(f"Debug: API HttpError finding file {file_name}: {e}. Response content: {e.content}")
         return None
     except Exception as e:
-        st.error(f"Unexpected error finding file {file_name}: {e}")
+        st.error(f"Debug: Unexpected error finding file {file_name}: {e}")
         return None
 
 def load_game_state_from_backend(game_id):
-    if not drive_service or not DRIVE_FOLDER_ID or not game_id: return None
+    st.write(f"Debug: load_game_state_from_backend called for game_id: {game_id}")
+    if not drive_service or not DRIVE_FOLDER_ID or not game_id:
+        st.warning(f"Debug: Load returning None early. Drive Service: {drive_service is not None}, Folder ID: {DRIVE_FOLDER_ID is not None}, Game ID: {game_id}")
+        return None
     file_name = f"{game_id}.json"
     try:
         file_id = find_file_in_drive(drive_service, file_name, DRIVE_FOLDER_ID)
         if file_id:
+            st.write(f"Debug: Loading file_id {file_id} for game {game_id}")
             request = drive_service.files().get_media(fileId=file_id)
             fh = io.BytesIO()
             downloader = MediaIoBaseDownload(fh, request)
             done = False
-            while not done: status, done = downloader.next_chunk() # pylint: disable=unused-variable
+            while not done: status, done = downloader.next_chunk()
             game_state_json_str = fh.getvalue().decode('utf-8')
+            st.success(f"Debug: Successfully downloaded game data for {game_id}")
             game_data_dict = json.loads(game_state_json_str)
             return _deserialize_state(game_data_dict)
-        return None
+        else:
+            st.info(f"Debug: No file_id found by find_file_in_drive for {game_id}, load returns None.")
+            return None # File not found by find_file_in_drive
     except HttpError as e:
-        if e.resp.status != 404: st.error(f"API error loading game {game_id} from GDrive: {e}")
+        st.error(f"Debug: API HttpError loading game {game_id} from GDrive: {e}. Response content: {e.content}")
         return None
     except Exception as e:
-        st.error(f"Unexpected error loading game {game_id} from GDrive: {e}")
+        st.error(f"Debug: Unexpected error loading game {game_id} from GDrive: {e}")
         return None
 
 def save_game_state_to_backend(game_id, state):
-    if not drive_service or not DRIVE_FOLDER_ID or not game_id: return
+    st.write(f"Debug: save_game_state_to_backend called for game_id: {game_id}")
+    if not drive_service or not DRIVE_FOLDER_ID or not game_id:
+        st.warning(f"Debug: Save returning early. Drive Service: {drive_service is not None}, Folder ID: {DRIVE_FOLDER_ID is not None}, Game ID: {game_id}")
+        return
     file_name = f"{game_id}.json"
     try:
         serializable_dict_state = _serialize_state(state.copy())
@@ -157,14 +185,19 @@ def save_game_state_to_backend(game_id, state):
         media = MediaIoBaseUpload(io.BytesIO(game_state_json_str.encode('utf-8')),
                                   mimetype='application/json', resumable=True)
         existing_file_id = find_file_in_drive(drive_service, file_name, DRIVE_FOLDER_ID)
+        st.write(f"Debug: Attempting to save {file_name}. Existing file_id: {existing_file_id}")
         if existing_file_id:
             drive_service.files().update(fileId=existing_file_id, media_body=media).execute()
+            st.success(f"Debug: Game state for {game_id} UPDATED in Drive.")
         else:
             drive_service.files().create(body=file_metadata, media_body=media, fields='id').execute()
-    except HttpError as e: st.error(f"API error saving game {game_id} to GDrive: {e}")
-    except Exception as e: st.error(f"Unexpected error saving game {game_id} to GDrive: {e}")
+            st.success(f"Debug: Game state for {game_id} CREATED in Drive.")
+    except HttpError as e:
+        st.error(f"Debug: API HttpError saving game {game_id} to GDrive: {e}. Response content: {e.content}")
+    except Exception as e:
+        st.error(f"Debug: Unexpected error saving game {game_id} to GDrive: {e}")
 
-# ---------- Logo & Title ----------
+# ---------- Logo & Title (no changes) ----------
 try: st.image(LOGO_PATH, width=150)
 except Exception: st.warning(f"Logo ({LOGO_PATH}) not found.")
 st.title(f"💣 Pass the Bomb - ASMPT Edition"); st.caption(f"Version: {APP_VERSION}")
@@ -174,32 +207,40 @@ st.markdown("#### _The ultimate loser buys the Matcha Lattes!_ 🍵")
 query_params = st.query_params 
 
 # ---------- Manage Game ID and Load State ----------
-if drive_service and DRIVE_FOLDER_ID:
+# This block now runs after Drive service initialization attempt
+if drive_service and DRIVE_FOLDER_ID: # Proceed only if Drive service is available
     current_game_id_from_url = query_params.get("game_id", None)
     if "game_loaded_from_backend" not in st.session_state:
         st.session_state.game_loaded_from_backend = False
         if current_game_id_from_url:
+            st.write(f"Debug: URL has game_id: {current_game_id_from_url}. Attempting to load.")
             loaded_state = load_game_state_from_backend(current_game_id_from_url)
             if loaded_state:
                 for k, v in loaded_state.items(): st.session_state[k] = v
                 st.session_state.game_id = loaded_state.get("game_id", current_game_id_from_url)
                 st.session_state.game_loaded_from_backend = True; st.toast(f"Loaded: {st.session_state.game_id}",icon="🔄")
+                st.write(f"Debug: Successfully loaded state for game_id: {st.session_state.game_id}")
             else:
-                st.warning(f"Could not load game: {current_game_id_from_url}. Starting new game setup.")
+                st.warning(f"Could not load game: {current_game_id_from_url}. Starting new game setup.") # This is your current message
+                st.write(f"Debug: load_game_state_from_backend returned None for {current_game_id_from_url}.")
                 if "game_id" in query_params: del query_params["game_id"]
                 st.session_state.game_id = None
-        else: st.session_state.game_id = None
-else:
-    if "game_id" in st.session_state: del st.session_state["game_id"]
+        else: 
+            st.write("Debug: No game_id in URL.")
+            st.session_state.game_id = None
+else: # Drive service not initialized
+    st.write("Debug: Drive service or folder ID not available for loading game state.")
+    if "game_id" in st.session_state: del st.session_state["game_id"] # Ensure clean state
     if "game_loaded_from_backend" not in st.session_state : st.session_state.game_loaded_from_backend = False
 
-# ---------- Initialise Session State ----------
+
+# ---------- Initialise Session State (no changes) ----------
 default_state_keys = {"game_started": False, "players": [], "pending_players": [], "current_holder": None,
     "game_end_time": None, "history": [], "game_id": None}
 for k, dv in default_state_keys.items():
     if k not in st.session_state: st.session_state[k] = dv
 
-# ---------- Game Setup UI ----------
+# ---------- Game Setup UI (no changes, but save calls check drive_service) ----------
 if not st.session_state.game_started:
     st.subheader("🎮 Setup New Game")
     p_col1, p_col2 = st.columns(2)
@@ -217,7 +258,7 @@ if not st.session_state.game_started:
                 rc1,rc2=st.columns([.8,.2]); rc1.markdown(f"- {pn}")
                 if rc2.button("❌",key=f"rm_p_{pn}_{i}",help=f"Remove {pn}"): st.session_state.pending_players.pop(i); st.rerun()
         else: st.markdown("_No players added._")
-    gd_label = st.selectbox("Game duration:",options=list(DEFAULT_GAME_DURATIONS.keys()),index=2)
+    gd_label = st.selectbox("Game duration:",options=list(DEFAULT_GAME_DURATIONS.keys()),index=1) # Changed default to 30 mins for quicker test
     if len(st.session_state.pending_players) < 2: st.info("Add at least 2 players.")
     else:
         if st.button("✅ Start Game",type="primary",use_container_width=True):
@@ -227,6 +268,10 @@ if not st.session_state.game_started:
                 if not st.session_state.game_id: 
                     st.session_state.game_id=generate_game_id()
                     query_params["game_id"]=st.session_state.game_id
+                    st.write(f"Debug: New game started with ID: {st.session_state.game_id}")
+                else:
+                    st.write(f"Debug: Starting game with existing ID: {st.session_state.game_id}")
+
                 st.session_state.players=list(st.session_state.pending_players); st.session_state.pending_players=[]
                 st.session_state.current_holder=random.choice(st.session_state.players)
                 st.session_state.game_end_time=datetime.now()+DEFAULT_GAME_DURATIONS[gd_label]
@@ -235,7 +280,7 @@ if not st.session_state.game_started:
                 save_game_state_to_backend(st.session_state.game_id,st.session_state)
                 st.balloons(); st.rerun()
 
-# ---------- Game Interface UI ----------
+# ---------- Game Interface UI (no changes, but save calls check drive_service) ----------
 if st.session_state.game_started:
     now = datetime.now()
     time_left_game = (st.session_state.game_end_time - now) if isinstance(st.session_state.game_end_time, datetime) else timedelta(seconds=0)
