@@ -16,8 +16,8 @@ st.set_page_config(page_title="Pass the Bomb", layout="centered", initial_sideba
 # --- END st.set_page_config() ---
 
 # ---------- App Constants & Configuration ----------
-APP_VERSION = "5.0 Live Timer Enabled"
-LOGO_PATH = "asmpt_logo.png" # Ensure this image is in the same directory
+APP_VERSION = "5.1 Auto-Refresh Game State" # <<<<<<< Updated Version
+LOGO_PATH = "asmpt_logo.png"
 
 DEFAULT_GAME_DURATIONS = {
     "☕ Short (15 mins)": timedelta(minutes=15),
@@ -28,6 +28,11 @@ DEFAULT_GAME_DURATIONS = {
     "💼 Week (Office Hours)": timedelta(days=5),
 }
 
+# Define default_state_keys globally for access in load logic
+DEFAULT_STATE_KEYS = {"game_started": False, "players": [], "pending_players": [], "current_holder": None,
+    "game_end_time": None, "history": [], "game_id": None}
+
+
 # ---------- Google Drive Service Initialization ----------
 drive_service = None
 DRIVE_FOLDER_ID = None
@@ -36,30 +41,21 @@ DRIVE_FOLDER_ID = None
 def init_drive_service():
     gcp_creds_secret = st.secrets.get("gcp_service_account")
     folder_id_secret = st.secrets.get("google_drive_folder_id")
-    temp_service = None
-    temp_folder_id = None
-
-    if not gcp_creds_secret:
-        st.error("CRITICAL: Google Drive credentials (gcp_service_account) not found in Streamlit Secrets.")
-    elif not folder_id_secret:
-        st.warning("CRITICAL: Google Drive Folder ID (google_drive_folder_id) not found in Streamlit Secrets.")
+    temp_service = None; temp_folder_id = None
+    if not gcp_creds_secret: st.error("CRITICAL: GCP service account secret NOT FOUND.")
+    elif not folder_id_secret: st.warning("CRITICAL: Google Drive Folder ID secret NOT FOUND.")
     else:
         try:
             creds_json_dict = dict(gcp_creds_secret) if hasattr(gcp_creds_secret, 'items') else gcp_creds_secret
             temp_folder_id = str(folder_id_secret)
-            creds = service_account.Credentials.from_service_account_info(
-                creds_json_dict,
-                scopes=['https://www.googleapis.com/auth/drive']
-            )
+            creds = service_account.Credentials.from_service_account_info(creds_json_dict, scopes=['https://www.googleapis.com/auth/drive'])
             temp_service = build('drive', 'v3', credentials=creds, cache_discovery=False)
-        except Exception as e:
-            st.error(f"Failed to initialize Google Drive service: {e}")
-            temp_service = None; temp_folder_id = None
+        except Exception as e: st.error(f"Failed to initialize GDrive: {e}"); temp_service = None; temp_folder_id = None
     return temp_service, temp_folder_id
 
 drive_service, DRIVE_FOLDER_ID = init_drive_service()
 
-# ---------- Helper Functions ----------
+# ---------- Helper Functions (no changes) ----------
 def format_timedelta(td):
     if td is None or td.total_seconds() < 0: return "0 seconds"
     total_seconds = int(td.total_seconds())
@@ -70,25 +66,20 @@ def format_timedelta(td):
     if minutes: parts.append(f"{minutes} minute{'s' if minutes != 1 else ''}")
     if total_seconds < 60 or not parts: parts.append(f"{seconds} second{'s' if seconds != 1 else ''}")
     return ", ".join(parts) if parts else "0 seconds"
-
 def generate_game_id(): return "".join(random.choices("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", k=8))
-
 def _serialize_state(state_dict):
-    s_state = {}
+    s_state = {};
     for k, v in state_dict.items():
         if isinstance(v, datetime): s_state[k] = v.isoformat()
         elif k == "history" and isinstance(v, list):
             s_state[k] = []
-            for r in v:
-                nr = r.copy();
-                if nr.get("time") and isinstance(nr["time"], datetime): nr["time"] = nr["time"].isoformat()
-                s_state[k].append(nr)
-        elif k not in ["new_player_name_input"] and not k.startswith("remove_player_") and not k.startswith("rm_p_"):
-            s_state[k] = v
+            for r in v: nr = r.copy();
+                         if nr.get("time") and isinstance(nr["time"], datetime): nr["time"] = nr["time"].isoformat()
+                         s_state[k].append(nr)
+        elif k not in ["new_player_name_input"] and not k.startswith("remove_player_") and not k.startswith("rm_p_"): s_state[k] = v
     return s_state
-
 def _deserialize_state(json_data):
-    d_state = json_data.copy()
+    d_state = json_data.copy();
     for k, v in json_data.items():
         if isinstance(v, str):
             try: d_state[k] = datetime.fromisoformat(v); continue
@@ -102,10 +93,10 @@ def _deserialize_state(json_data):
                         try: nr["time"] = datetime.fromisoformat(nr["time"])
                         except (TypeError, ValueError): pass
                     d_state[k].append(nr)
-                else: st.warning(f"Skipping non-dict in '{k}': {r_dict}") # Keep this minor warning
+                else: st.warning(f"Skipping non-dict in '{k}': {r_dict}")
     return d_state
 
-# --- Google Drive Persistence Functions ---
+# --- Google Drive Persistence Functions (no changes) ---
 def find_file_in_drive(service, file_name, folder_id):
     if not service or not folder_id: return None
     query = f"name='{file_name}' and '{folder_id}' in parents and trashed=false"
@@ -113,13 +104,10 @@ def find_file_in_drive(service, file_name, folder_id):
         response = service.files().list(q=query, spaces='drive', fields='files(id, name)').execute()
         files = response.get('files', [])
         return files[0]['id'] if files else None
-    except HttpError as e: # Keep error reporting for actual API failures
+    except HttpError as e:
         if e.resp.status != 404 : st.error(f"DRIVE API ERROR (find_file for {file_name}): {e.resp.status} - {e.content.decode()}")
         return None
-    except Exception as e:
-        st.error(f"UNEXPECTED ERROR (find_file for {file_name}): {e}")
-        return None
-
+    except Exception as e: st.error(f"UNEXPECTED ERROR (find_file for {file_name}): {e}"); return None
 def load_game_state_from_backend(game_id):
     if not drive_service or not DRIVE_FOLDER_ID or not game_id: return None
     file_name = f"{game_id}.json"
@@ -136,43 +124,30 @@ def load_game_state_from_backend(game_id):
     except HttpError as e:
         if e.resp.status != 404: st.error(f"DRIVE API ERROR (load_state for {game_id}): {e.resp.status} - {e.content.decode()}")
         return None
-    except Exception as e:
-        st.error(f"UNEXPECTED ERROR (load_state for {game_id}): {e}")
-        return None
-
+    except Exception as e: st.error(f"UNEXPECTED ERROR (load_state for {game_id}): {e}"); return None
 def save_game_state_to_backend(game_id, session_state_proxy):
     if not drive_service or not DRIVE_FOLDER_ID or not game_id:
-        st.error("SAVE FAILED: Drive service not configured or no game_id.") # Keep this important error
-        return False
-
+        st.error("SAVE FAILED: Drive service not configured or no game_id."); return False
     state_to_save_dict = {k: v for k, v in session_state_proxy.items()}
     file_name = f"{game_id}.json"
     try:
         serializable_dict_state = _serialize_state(state_to_save_dict)
-        if "oldest_ticket_days_to_beat" in serializable_dict_state: # cleanup old key
-            del serializable_dict_state["oldest_ticket_days_to_beat"]
-        
+        if "oldest_ticket_days_to_beat" in serializable_dict_state: del serializable_dict_state["oldest_ticket_days_to_beat"]
         game_state_json_str = json.dumps(serializable_dict_state, indent=2)
         file_metadata = {'name': file_name, 'parents': [DRIVE_FOLDER_ID]}
-        media = MediaIoBaseUpload(io.BytesIO(game_state_json_str.encode('utf-8')),
-                                  mimetype='application/json', resumable=True)
+        media = MediaIoBaseUpload(io.BytesIO(game_state_json_str.encode('utf-8')), mimetype='application/json', resumable=True)
         existing_file_id = find_file_in_drive(drive_service, file_name, DRIVE_FOLDER_ID)
-        
         if existing_file_id:
             drive_service.files().update(fileId=existing_file_id, media_body=media).execute()
-            st.toast(f"Game {game_id} updated in Drive.", icon="💾") # User-facing toast
+            st.toast(f"Game {game_id} updated in Drive.", icon="💾")
         else:
             drive_service.files().create(body=file_metadata, media_body=media, fields='id').execute()
-            st.toast(f"Game {game_id} created in Drive.", icon="✨") # User-facing toast
+            st.toast(f"Game {game_id} created in Drive.", icon="✨")
         return True
-    except HttpError as e:
-        st.error(f"DRIVE API ERROR (save_state for {game_id}): {e.resp.status} - {e.content.decode()}")
-        return False
-    except Exception as e:
-        st.error(f"UNEXPECTED ERROR (save_state for {game_id}): {e}")
-        return False
+    except HttpError as e: st.error(f"DRIVE API ERROR (save_state for {game_id}): {e.resp.status} - {e.content.decode()}"); return False
+    except Exception as e: st.error(f"UNEXPECTED ERROR (save_state for {game_id}): {e}"); return False
 
-# ---------- Logo & Title ----------
+# ---------- Logo & Title (no changes) ----------
 try: st.image(LOGO_PATH, width=150)
 except Exception: st.warning(f"Logo ({LOGO_PATH}) not found.")
 st.title(f"💣 Pass the Bomb - ASMPT Edition"); st.caption(f"Version: {APP_VERSION}")
@@ -181,167 +156,22 @@ st.markdown("#### _The ultimate loser buys the Matcha Lattes!_ 🍵")
 
 query_params = st.query_params 
 
-# ---------- Manage Game ID and Load State ----------
+# ---------- MODIFIED: Manage Game ID and Load State (Auto-Refresh Logic) ----------
 if drive_service and DRIVE_FOLDER_ID:
     current_game_id_from_url = query_params.get("game_id", None)
-    if "game_loaded_from_backend" not in st.session_state:
-        st.session_state.game_loaded_from_backend = False
-        if current_game_id_from_url:
-            loaded_state = load_game_state_from_backend(current_game_id_from_url)
-            if loaded_state:
-                for k, v in loaded_state.items(): st.session_state[k] = v
-                st.session_state.game_id = loaded_state.get("game_id", current_game_id_from_url)
-                st.session_state.game_loaded_from_backend = True; st.toast(f"Loaded: {st.session_state.game_id}",icon="🔄")
-            else:
-                st.warning(f"Could not load game: {current_game_id_from_url}. Starting new game setup.")
-                if "game_id" in query_params: del query_params["game_id"]
-                st.session_state.game_id = None
-        else: st.session_state.game_id = None
-else: # Drive service not initialized
-    # Errors/warnings are handled by init_drive_service()
-    if "game_id" in st.session_state: del st.session_state["game_id"] 
-    if "game_loaded_from_backend" not in st.session_state : st.session_state.game_loaded_from_backend = False
 
-# ---------- Initialise Session State ----------
-default_state_keys = {"game_started": False, "players": [], "pending_players": [], "current_holder": None,
-    "game_end_time": None, "history": [], "game_id": None}
-for k, dv in default_state_keys.items():
-    if k not in st.session_state: st.session_state[k] = dv
-
-# ---------- Game Setup UI ----------
-if not st.session_state.game_started:
-    st.subheader("🎮 Setup New Game")
-    p_col1, p_col2 = st.columns(2)
-    with p_col1:
-        with st.form("add_players_form", clear_on_submit=True):
-            name = st.text_input("Enter player name", key="new_player_name_input")
-            add_p_submitted = st.form_submit_button("➕ Add Player")
-            if add_p_submitted and name.strip():
-                if name.strip() not in st.session_state.pending_players: st.session_state.pending_players.append(name.strip())
-                else: st.warning(f"{name.strip()} already in list.")
-    with p_col2:
-        if st.session_state.pending_players:
-            st.markdown("**Players to Add:**")
-            for i, pn in enumerate(list(st.session_state.pending_players)):
-                rc1,rc2=st.columns([.8,.2]); rc1.markdown(f"- {pn}")
-                if rc2.button("❌",key=f"rm_p_{pn}_{i}",help=f"Remove {pn}"): st.session_state.pending_players.pop(i); st.rerun()
-        else: st.markdown("_No players added._")
-    gd_label = st.selectbox("Game duration:",options=list(DEFAULT_GAME_DURATIONS.keys()),index=1)
-    if len(st.session_state.pending_players) < 2: st.info("Add at least 2 players.")
-    else:
-        if st.button("✅ Start Game",type="primary",use_container_width=True):
-            if not (drive_service and DRIVE_FOLDER_ID): 
-                st.error("Google Drive not configured. Cannot start game.")
-            else:
-                if not st.session_state.game_id: 
-                    st.session_state.game_id=generate_game_id()
-                    query_params["game_id"]=st.session_state.game_id
-                st.session_state.players=list(st.session_state.pending_players); st.session_state.pending_players=[]
-                st.session_state.current_holder=random.choice(st.session_state.players)
-                st.session_state.game_end_time=datetime.now()+DEFAULT_GAME_DURATIONS[gd_label]
-                st.session_state.history=[]
-                st.session_state.game_started=True; st.session_state.game_loaded_from_backend=True
-                save_successful = save_game_state_to_backend(st.session_state.game_id, st.session_state)
-                if save_successful:
-                    st.balloons(); st.rerun()
-                else: # Save failed
-                    st.error("Failed to save initial game state. Game may not persist.")
-                    st.rerun() # Rerun to show error and current state (without balloons)
-
-
-# ---------- Game Interface UI ----------
-if st.session_state.game_started:
-    now = datetime.now()
-    time_left_game = (st.session_state.game_end_time - now) if isinstance(st.session_state.game_end_time, datetime) else timedelta(seconds=0)
-
-    if time_left_game.total_seconds() <= 0:
-        st.error(f"🏁 **GAME OVER!** 🏁"); st.subheader(f"Final bomb holder: **{st.session_state.current_holder}**")
-        st.warning(f"**{st.session_state.current_holder}** buys Matcha Lattes! 🍵"); st.balloons()
-        if drive_service and DRIVE_FOLDER_ID: save_game_state_to_backend(st.session_state.game_id, st.session_state)
-    else: 
-        st.subheader(f"💣 Bomb held by: {st.session_state.current_holder}")
-        st.metric("Game Ends In:", format_timedelta(time_left_game)); st.markdown("---")
-        st.subheader("↪️ Pass the Bomb")
-        st.markdown("_Enter any ticket details to pass the bomb._")
-        can_pass = False; pass_to_options = []
-        if st.session_state.current_holder and st.session_state.current_holder in st.session_state.players and \
-           isinstance(st.session_state.players, list) and len(st.session_state.players) >= 2:
-             pass_to_options = [p for p in st.session_state.players if p != st.session_state.current_holder]
-             if pass_to_options: can_pass = True
-        if not can_pass: st.error("Cannot pass bomb: No valid players to pass to.")
-        else:
-            current_turn_identifier = len(st.session_state.get("history", []))
-            dynamic_form_key = f"pass_form_turn_{current_turn_identifier}_{st.session_state.current_holder}"
-            with st.form(dynamic_form_key):
-                st.markdown(f"You are: **{st.session_state.current_holder}** (current bomb holder)")
-                next_player = st.selectbox("Pass bomb to:", pass_to_options, index=0)
-                ticket_number = st.text_input("Ticket Number/ID:", placeholder="e.g. INC123456")
-                old_ticket_val = st.session_state.get("oldest_ticket_days_to_beat", 0) 
-                d_val = datetime.now().date() - timedelta(days=max(0, int(old_ticket_val)) + 1)
-                ticket_date = st.date_input("Ticket creation date:", max_value=datetime.now().date(), value=d_val)
-                submit_pass_button_pressed = st.form_submit_button("Pass This Bomb!")
-                if submit_pass_button_pressed:
-                    if not (drive_service and DRIVE_FOLDER_ID):
-                        st.error("Google Drive not configured. Cannot save pass action.")
-                    elif not ticket_number.strip(): st.warning("⚠️ Enter ticket number.")
-                    else:
-                        days_old = (datetime.now().date() - ticket_date).days
-                        if days_old < 0: st.error("Ticket date cannot be future!")
-                        else:
-                            st.session_state.history.append({
-                                "from": st.session_state.current_holder, "to": next_player,
-                                "ticket": ticket_number, "days_old": days_old, "time": now
-                            })
-                            st.session_state.current_holder = next_player
-                            # Success message will now come from save_game_state_to_backend (as a toast)
-                            # or an error if save fails.
-                            
-                            save_successful = save_game_state_to_backend(st.session_state.game_id, st.session_state)
-                            
-                            if save_successful:
-                                st.success(f"🎉 Bomb Passed to {next_player}! Ticket: {days_old}d old.") # Show this before rerun
-                                st.rerun()
-                            else:
-                                st.error("Failed to save game state after pass. The pass happened in this session but might not persist. Check errors above.")
-                                # Rerun to show error and current (unsaved) state
-                                st.rerun() 
-                                
-    st.markdown("---"); st.subheader("📊 Game Stats & History")
-    with st.expander("📜 Bomb Pass History", expanded=True):
-        if not st.session_state.history: st.caption("_No passes yet._")
-        else:
-            for r in reversed(st.session_state.history):
-                t_val=r.get('time');t_str=t_val.strftime('%Y-%m-%d %H:%M:%S') if isinstance(t_val,datetime) else str(t_val)
-                st.markdown(f"-`{r.get('from','?')}`➡️`{r.get('to','?')}`(Tkt:`{r.get('ticket','?')}`–**{r.get('days_old','?')}d old**) at {t_str}")
-
-# ---------- Sidebar Controls ----------
-with st.sidebar:
-    st.header("⚙️ Game Controls")
-    if st.session_state.game_id: st.markdown(f"**Game ID:** `{st.session_state.game_id}`"); st.caption("Share URL to join.")
-    else: st.caption("Start new game or use Game ID URL.")
-    if st.session_state.game_started:
-        st.subheader("Players:")
-        if st.session_state.players:
-            for p in st.session_state.players: st.markdown(f"- **{p}** {'💣' if p==st.session_state.current_holder else ''}")
-        else: st.caption("_No players._")
-        st.markdown("---")
-        if st.button("⚠️ End Game Prematurely",type="secondary"):
-            st.session_state.game_end_time=datetime.now()
-            if drive_service and DRIVE_FOLDER_ID: 
-                save_game_state_to_backend(st.session_state.game_id,st.session_state)
-            st.rerun()
-    if st.button("🔄 Start New Setup / Restart App",type="primary"):
-        current_q_params=st.query_params.to_dict()
-        if "game_id" in current_q_params: del current_q_params["game_id"]; st.query_params.from_dict(current_q_params)
-        for key in list(st.session_state.keys()): del st.session_state[key]
-        st.toast("App reset.",icon="🧹"); st.rerun()
-
-# ---------- Footer ----------
-st.markdown("<br><hr><center><sub>Made for ASMPT · Powered by Streamlit & Matcha</sub></center>", unsafe_allow_html=True)
-
-# ---------- Live Timer Update (ENABLED) ----------
-if st.session_state.get("game_started", False) and isinstance(st.session_state.get("game_end_time"), datetime):
-    if drive_service and DRIVE_FOLDER_ID: # Only run timer if game can function (Drive configured)
-        if st.session_state.game_end_time > datetime.now():
-            time.sleep(1) 
-            st.rerun()
+    if current_game_id_from_url:
+        # If a game_id is in the URL, ALWAYS try to load its latest state.
+        # This will be triggered by the 1-second auto-refresh (and other reruns) for all viewers.
+        # st.write(f"Debug (ManageID - AutoRefresh): URL has game_id: {current_game_id_from_url}. Forcing load.") # Optional debug
+        loaded_state = load_game_state_from_backend(current_game_id_from_url)
+        
+        if loaded_state:
+            # Update session_state with the fresh data from GDrive
+            for k, v in loaded_state.items():
+                # Only update if the key is part of our known game state
+                if k in DEFAULT_STATE_KEYS: # Use the globally defined DEFAULT_STATE_KEYS
+                     st.session_state[k] = v
+            
+            st.session_state.game_id = loaded_state.get("game_id", current_game_id_from_url) # Ensure game_id is set
+            st.session_state.game_started = loaded_state.get("game_started", False) # Ensure game
