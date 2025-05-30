@@ -11,7 +11,7 @@ import io
 # --- CONFIG ---
 st.set_page_config(page_title="Pass the Bomb", layout="centered", initial_sidebar_state="collapsed")
 LOGO_PATH = "asmpt_logo.png"
-APP_VERSION = "5.3 Deferred Load Fix"
+APP_VERSION = "5.3 Fixed Form Submit"
 
 DEFAULT_GAME_DURATIONS = {
     "☕ Short (15 mins)": timedelta(minutes=15),
@@ -30,7 +30,7 @@ DEFAULT_STATE_KEYS = {
     "game_end_time": None,
     "history": [],
     "game_id": None,
-    "defer_load_after_create": False  # NEW
+    "defer_load_after_create": False
 }
 
 # --- Google Drive Setup ---
@@ -185,8 +185,8 @@ if st.session_state["game_started"]:
             next_player = st.selectbox("Pass to:", [p for p in st.session_state["players"] if p != who])
             ticket = st.text_input("Ticket number")
             date = st.date_input("Ticket creation date", max_value=datetime.now().date())
-            passed = st.form_submit_button("Pass This Bomb!")
-            if passed:
+
+            if st.form_submit_button("Pass This Bomb!"):
                 age = (datetime.now().date() - date).days
                 st.session_state["history"].append({
                     "from": who,
