@@ -1,5 +1,5 @@
 import streamlit as st
-from datetime import datetime, timedelta, date # Ensure 'date' is imported
+from datetime import datetime, timedelta, date 
 import random
 import json
 import time
@@ -11,7 +11,7 @@ import io
 # --- CONFIG ---
 st.set_page_config(page_title="Pass the Bomb", layout="centered", initial_sidebar_state="collapsed")
 LOGO_PATH = "asmpt_logo.png"
-APP_VERSION = "5.7 Selective Save" # Updated version
+APP_VERSION = "5.8 Button Key Test" # Updated version
 
 DEFAULT_GAME_DURATIONS = {
     "☕ Short (15 mins)": timedelta(minutes=15),
@@ -22,10 +22,10 @@ DEFAULT_GAME_DURATIONS = {
     "💼 Week (Office Hours)": timedelta(days=5),
 }
 
-DEFAULT_STATE_KEYS = { # These are the keys defining the core game state to be saved/loaded
+DEFAULT_STATE_KEYS = { 
     "game_started": False,
     "players": [],
-    "pending_players": [], # Note: pending_players will be empty once game starts, but good to define
+    "pending_players": [], 
     "current_holder": None,
     "game_end_time": None,
     "history": [],
@@ -50,15 +50,15 @@ def find_file(service, name, folder_id):
     files = r.get("files", [])
     return files[0]["id"] if files else None
 
-def _serialize(session_data): # session_data is st.session_state
+def _serialize(session_data): 
     data_to_save = {}
-    for key_to_save in DEFAULT_STATE_KEYS: # Iterate only over defined game state keys
+    for key_to_save in DEFAULT_STATE_KEYS: 
         if key_to_save in session_data:
             value = session_data[key_to_save]
             
-            if isinstance(value, datetime): # Handles datetime.datetime
+            if isinstance(value, datetime): 
                 data_to_save[key_to_save] = value.isoformat()
-            elif isinstance(value, date):   # Handles datetime.date
+            elif isinstance(value, date):   
                 data_to_save[key_to_save] = value.isoformat()
             elif key_to_save == "history":
                 serialized_history = []
@@ -69,72 +69,58 @@ def _serialize(session_data): # session_data is st.session_state
                             time_val = e.get("time")
                             if isinstance(time_val, datetime):
                                 e["time"] = time_val.isoformat()
-                            elif isinstance(time_val, date): # Just in case
+                            elif isinstance(time_val, date): 
                                 e["time"] = time_val.isoformat()
                             serialized_history.append(e)
-                        # else: could append raw entry if history items aren't always dicts
                 data_to_save[key_to_save] = serialized_history
-            else: # For other types like bool, string, list of strings, int
+            else: 
                 data_to_save[key_to_save] = value
     return data_to_save
 
 def _deserialize(data_from_file):
     deserialized_state = {}
     for k, v_loaded in data_from_file.items():
-        # Ensure we only process keys that are expected (part of DEFAULT_STATE_KEYS)
-        # or handle them generally if the file might contain more.
-        # For now, assuming data_from_file only contains what _serialize saved.
-        
         if k == "history":
             deserialized_history = []
             if isinstance(v_loaded, list):
                 for entry in v_loaded:
                     new_entry = {}
-                    if isinstance(entry, dict): # Ensure entry is a dict
+                    if isinstance(entry, dict): 
                         new_entry = entry.copy()
                         time_str = new_entry.get("time")
                         if isinstance(time_str, str):
                             try:
                                 new_entry["time"] = datetime.fromisoformat(time_str)
                             except ValueError:
-                                pass # Keep as string if not valid isoformat
+                                pass 
                     deserialized_history.append(new_entry)
             deserialized_state[k] = deserialized_history
         elif isinstance(v_loaded, str):
             try:
-                # Attempt to convert strings back to datetime if they are ISO format
-                # This will handle both datetime and date strings from isoformat()
                 deserialized_state[k] = datetime.fromisoformat(v_loaded)
             except ValueError:
-                deserialized_state[k] = v_loaded # Keep as string if not ISO datetime
+                deserialized_state[k] = v_loaded 
         else:
             deserialized_state[k] = v_loaded
 
-    # Ensure all default keys are present in the final state, even if not in file
     for default_k, default_v in DEFAULT_STATE_KEYS.items():
         if default_k not in deserialized_state:
             deserialized_state[default_k] = default_v
-        # Specific type checks for critical fields after loading
         if default_k == "players" and not isinstance(deserialized_state.get("players"), list):
             deserialized_state["players"] = []
         if default_k == "history" and not isinstance(deserialized_state.get("history"), list):
             deserialized_state["history"] = []
-
     return deserialized_state
-
 
 def save_to_drive(game_id, current_session_state):
     if not game_id:
         st.error("Attempted to save game with no ID!")
         return
     try:
-        # Pass current_session_state to _serialize
         data_to_save = _serialize(current_session_state) 
         json_data = json.dumps(data_to_save, indent=2)
     except TypeError as e:
         st.error(f"Failed to serialize game state to JSON: {e}")
-        # For debugging, print the structure that _serialize produced:
-        # st.error(f"Problematic structure from _serialize: {data_to_save}") 
         raise 
     
     media = MediaIoBaseUpload(io.BytesIO(json_data.encode()), mimetype="application/json")
@@ -188,21 +174,16 @@ for k, v_default in DEFAULT_STATE_KEYS.items():
 if not st.session_state.get("game_started"):
     gid_from_url = current_query_params.get("game_id")
     if gid_from_url:
-        # Load if game_id in session doesn't match URL, or if game isn't marked as started
         if st.session_state.get("game_id") != gid_from_url or not st.session_state.get("game_started"):
-            # st.session_state["game_id"] = gid_from_url # Set game_id before loading
             loaded_state_from_drive = load_from_drive(gid_from_url)
             if loaded_state_from_drive:
-                # Populate session_state with only the keys from loaded_state_from_drive
-                # which should correspond to DEFAULT_STATE_KEYS due to _serialize and _deserialize logic
                 for key_from_file, value_from_file in loaded_state_from_drive.items():
                     st.session_state[key_from_file] = value_from_file
-                
-                st.session_state["game_id"] = gid_from_url # Crucial: confirm game_id from URL
+                st.session_state["game_id"] = gid_from_url 
                 st.session_state["game_started"] = True
             else:
                 st.warning(f"Could not find or load game: {gid_from_url}. It may no longer exist or there was an error loading.")
-                if st.session_state.get("game_id") == gid_from_url: # If attempted load failed for this id
+                if st.session_state.get("game_id") == gid_from_url: 
                     st.session_state["game_id"] = None
                     st.session_state["game_started"] = False
 
@@ -233,13 +214,13 @@ if not st.session_state.get("game_started"):
             st.query_params["game_id"] = new_game_id
             
             st.session_state["players"] = list(st.session_state["pending_players"])
-            st.session_state["pending_players"] = [] # Clear pending players list
+            st.session_state["pending_players"] = [] 
             st.session_state["current_holder"] = random.choice(st.session_state["players"])
             st.session_state["game_end_time"] = datetime.now() + DEFAULT_GAME_DURATIONS[selected_duration_label]
             st.session_state["history"] = [{"event": "Game Started", "player": st.session_state["current_holder"], "time": datetime.now()}]
             st.session_state["game_started"] = True
             
-            save_to_drive(st.session_state["game_id"], st.session_state) # Pass full session_state
+            save_to_drive(st.session_state["game_id"], st.session_state) 
             st.rerun()
 
 # --- Game Play ---
@@ -268,16 +249,18 @@ if st.session_state.get("game_started") and st.session_state.get("game_id"):
             st.subheader("Pass the Bomb")
             
             current_players_list_for_form = st.session_state.get("players", [])
-            
+            if not isinstance(current_players_list_for_form, list): 
+                current_players_list_for_form = []
+
             if st.session_state.get("current_holder") not in current_players_list_for_form:
                 st.error("Error: Current bomb holder is not a valid player. Game state might be corrupted. Please restart.")
             else:
-                with st.form("pass_form"): # Explicit key for the form
+                with st.form("pass_form"): 
                     current_bomb_holder = st.session_state["current_holder"]
                     available_players_to_pass = [p for p in current_players_list_for_form if p != current_bomb_holder]
                     
-                    next_player_selected = None # Initialize
-                    pass_button_disabled = True # Initialize as disabled
+                    next_player_selected = None 
+                    pass_button_disabled = True 
 
                     if not available_players_to_pass:
                         st.warning("No other players to pass the bomb to!")
@@ -288,11 +271,11 @@ if st.session_state.get("game_started") and st.session_state.get("game_id"):
                     ticket_number = st.text_input("Ticket number", key="ticket_input")
                     ticket_date_val = st.date_input("Ticket creation date", value="today", max_value=datetime.now().date(), key="ticket_date_input")
                     
-                    # Give the submit button a unique key to see if it helps with state issues
-                    submitted_pass_bomb = st.form_submit_button("Pass This Bomb!", disabled=pass_button_disabled, key="pass_bomb_submit_button")
+                    # MODIFIED: Removed explicit key from form_submit_button
+                    submitted_pass_bomb = st.form_submit_button("Pass This Bomb!", disabled=pass_button_disabled)
 
                     if submitted_pass_bomb:
-                        if next_player_selected and ticket_date_val: # Ensure values are not None
+                        if next_player_selected and ticket_date_val: 
                             days_ticket_age = (datetime.now().date() - ticket_date_val).days
                             st.session_state["history"].append({
                                 "from": current_bomb_holder,
@@ -302,12 +285,11 @@ if st.session_state.get("game_started") and st.session_state.get("game_id"):
                                 "time": datetime.now()
                             })
                             st.session_state["current_holder"] = next_player_selected
-                            save_to_drive(st.session_state["game_id"], st.session_state) # Pass full session_state
+                            save_to_drive(st.session_state["game_id"], st.session_state) 
                             st.success(f"Ticket was {days_ticket_age} days old. Bomb passed to {next_player_selected}!")
                             st.rerun()
                         else:
                             st.warning("Please ensure a player is selected and the date is set.")
-
 
         st.markdown("---")
         st.subheader("📜 Bomb Pass History")
@@ -337,7 +319,7 @@ with st.sidebar:
     if st.button("🔁 Restart Game / New Game", key="restart_game_button_sidebar"):
         for key, default_value in DEFAULT_STATE_KEYS.items():
             st.session_state[key] = default_value
-        st.query_params.clear() # Clear the game_id from URL
+        st.query_params.clear() 
         st.rerun()
 
 # --- Footer ---
@@ -346,8 +328,5 @@ st.markdown("<br><hr><center><sub>Made for ASMPT · Powered by Streamlit & Match
 # --- Live Refresh (if game is active) ---
 if st.session_state.get("game_started") and st.session_state.get("game_id") and isinstance(st.session_state.get("game_end_time"), datetime):
     if st.session_state["game_end_time"] > datetime.now():
-        # Only sleep and rerun if no interaction is being processed (avoid interrupting forms)
-        # This is a bit tricky to get right; a simpler periodic rerun is often used.
-        # For now, the 1-second refresh is standard.
         time.sleep(1) 
         st.rerun()
