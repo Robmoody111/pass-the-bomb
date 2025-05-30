@@ -11,7 +11,7 @@ import io
 # --- CONFIG ---
 st.set_page_config(page_title="Pass the Bomb", layout="centered", initial_sidebar_state="collapsed")
 LOGO_PATH = "asmpt_logo.png"
-APP_VERSION = "5.4 Smoother Join" # Updated version
+APP_VERSION = "5.5 Seamless Start" # Updated version
 
 DEFAULT_GAME_DURATIONS = {
     "☕ Short (15 mins)": timedelta(minutes=15),
@@ -22,6 +22,7 @@ DEFAULT_GAME_DURATIONS = {
     "💼 Week (Office Hours)": timedelta(days=5),
 }
 
+# REMOVED 'defer_load_after_create' from DEFAULT_STATE_KEYS
 DEFAULT_STATE_KEYS = {
     "game_started": False,
     "players": [],
@@ -30,7 +31,6 @@ DEFAULT_STATE_KEYS = {
     "game_end_time": None,
     "history": [],
     "game_id": None,
-    "defer_load_after_create": False
 }
 
 # --- Google Drive Setup ---
@@ -54,6 +54,7 @@ def find_file(service, name, folder_id):
 def _serialize(state):
     result = {}
     for k, v in state.items():
+        # No need to explicitly skip "defer_load_after_create" as it's removed from state keys
         if isinstance(v, datetime): result[k] = v.isoformat()
         elif k == "history":
             result[k] = []
@@ -63,7 +64,7 @@ def _serialize(state):
                     if isinstance(e.get("time"), datetime):
                         e["time"] = e["time"].isoformat()
                     result[k].append(e)
-        elif k != "defer_load_after_create": # Don't save this transient flag
+        else:
             result[k] = v
     return result
 
@@ -72,14 +73,14 @@ def _deserialize(data):
     for k, v in data.items():
         if k == "history":
             result[k] = []
-            for entry in v: # Ensure entry is a dict before accessing "time"
+            for entry in v:
                 if isinstance(entry, dict) and isinstance(entry.get("time"), str):
                     try: entry["time"] = datetime.fromisoformat(entry["time"])
-                    except: pass # Keep as string if not valid isoformat
+                    except: pass
                 result[k].append(entry)
         elif isinstance(v, str):
             try: result[k] = datetime.fromisoformat(v)
-            except: pass # Keep as string if not valid isoformat
+            except: pass
     return result
 
 def save_to_drive(game_id, state):
@@ -112,7 +113,6 @@ def load_from_drive(game_id):
         st.error(f"Error decoding game data for game ID: {game_id}. The file might be corrupted.")
         return None
 
-
 # --- UI Layout ---
 try: st.image(LOGO_PATH, width=180)
 except: st.warning("Logo file 'asmpt_logo.png' not found. Please ensure it's in the same directory.")
@@ -122,42 +122,32 @@ st.markdown("### _Don't get caught holding the bomb when time runs out!_")
 st.markdown("#### _The ultimate loser buys the Matcha Lattes! 🍵_")
 
 # --- Session Init ---
-# Get query_params at the beginning of the script run
-current_query_params = st.query_params 
-
+current_query_params = st.query_params
 for k, v_default in DEFAULT_STATE_KEYS.items():
     if k not in st.session_state:
         st.session_state[k] = v_default
 
-if st.session_state.get("defer_load_after_create"): # Use .get for safety
-    st.session_state["defer_load_after_create"] = False
-    st.stop()
+# REMOVED 'defer_load_after_create' handling block
+# if st.session_state.get("defer_load_after_create"):
+#     st.session_state["defer_load_after_create"] = False
+#     st.stop()
 
 # --- Load Existing Game if game_id in URL ---
-# This block runs only if a game is not already started in the current session.
-if not st.session_state.get("game_started"): # Use .get for safety
+if not st.session_state.get("game_started"):
     gid_from_url = current_query_params.get("game_id")
     if gid_from_url:
-        # Attempt to load only if not already loaded to prevent loops on error
-        if st.session_state.get("game_id") != gid_from_url:
-            st.session_state["game_id"] = gid_from_url # Tentatively set game_id
+        if st.session_state.get("game_id") != gid_from_url or not st.session_state.get("game_started"): # Ensure we load if ID changed or not started
+            st.session_state["game_id"] = gid_from_url
             state = load_from_drive(gid_from_url)
             if state:
-                # Successfully loaded state, now update session_state fully
                 for k_loaded, v_loaded in state.items():
                     st.session_state[k_loaded] = v_loaded
-                # Crucially, ensure game_id from URL is the one used and mark game as started
                 st.session_state["game_id"] = gid_from_url
                 st.session_state["game_started"] = True
-                # NO st.rerun() HERE. Allow script to continue to "Game Play" section.
             else:
                 st.warning(f"Could not find or load game: {gid_from_url}. It may no longer exist or there was an error loading.")
-                # Clear game_id if loading failed to allow starting a new game or trying another ID
                 st.session_state["game_id"] = None
                 st.session_state["game_started"] = False
-                # Optionally, clear the game_id from st.query_params if it's invalid
-                # st.query_params.clear() # Or st.query_params.pop("game_id", None) if you want to keep others
-                # For now, just warn and let user decide next steps (e.g. refresh, new game)
 
 # --- New Game UI ---
 if not st.session_state.get("game_started"):
@@ -168,7 +158,7 @@ if not st.session_state.get("game_started"):
         if add_player_submitted and new_player_name.strip():
             if new_player_name.strip() not in st.session_state["pending_players"]:
                 st.session_state["pending_players"].append(new_player_name.strip())
-                st.rerun() # Rerun to update display of pending players immediately
+                st.rerun()
 
     if st.session_state["pending_players"]:
         st.markdown("**Players to join:**")
@@ -184,45 +174,39 @@ if not st.session_state.get("game_started"):
             new_game_id = "".join(random.choices("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", k=8))
             st.session_state["game_id"] = new_game_id
             
-            # Update query params to reflect the new game ID in the URL
-            st.query_params["game_id"] = new_game_id
+            st.query_params["game_id"] = new_game_id # Update URL
             
-            st.session_state["players"] = list(st.session_state["pending_players"]) # Finalize players
-            st.session_state["pending_players"] = [] # Clear pending list
+            st.session_state["players"] = list(st.session_state["pending_players"])
+            st.session_state["pending_players"] = []
             st.session_state["current_holder"] = random.choice(st.session_state["players"])
             st.session_state["game_end_time"] = datetime.now() + DEFAULT_GAME_DURATIONS[selected_duration_label]
             st.session_state["history"] = [{"event": "Game Started", "player": st.session_state["current_holder"], "time": datetime.now()}]
             st.session_state["game_started"] = True
             
             save_to_drive(st.session_state["game_id"], st.session_state)
-            st.session_state["defer_load_after_create"] = True # Flag to stop and allow URL to update
-            st.rerun()
+            # REMOVED: st.session_state["defer_load_after_create"] = True
+            st.rerun() # This rerun should now directly show the game play screen
 
 # --- Game Play ---
 if st.session_state.get("game_started") and st.session_state.get("game_id"):
-    # Ensure game_end_time is a datetime object
     if not isinstance(st.session_state.get("game_end_time"), datetime):
         st.error("Game end time is not set correctly. Please restart the game.")
-        st.session_state["game_started"] = False # Stop game play
+        st.session_state["game_started"] = False
     else:
         time_now = datetime.now()
         game_time_left = st.session_state["game_end_time"] - time_now
 
         if game_time_left.total_seconds() <= 0:
             st.error("🏁 Game Over!")
-            st.subheader(f"Final bomb holder: {st.session_state['current_holder']}")
-            st.warning(f"**{st.session_state['current_holder']}** buys the Matcha Lattes! 🍵")
-            # Consider saving one last time or marking as complete on Drive
-            # save_to_drive(st.session_state["game_id"], st.session_state) # Already saved on pass
+            st.subheader(f"Final bomb holder: {st.session_state.get('current_holder', 'N/A')}")
+            st.warning(f"**{st.session_state.get('current_holder', 'N/A')}** buys the Matcha Lattes! 🍵")
         else:
-            st.subheader(f"💣 Bomb held by: {st.session_state['current_holder']}")
+            st.subheader(f"💣 Bomb held by: {st.session_state.get('current_holder', 'N/A')}")
             st.metric("Time remaining:", str(game_time_left).split(".")[0])
-
             st.markdown("---")
             st.subheader("Pass the Bomb")
             
-            # Ensure current_holder is valid before rendering form
-            if st.session_state["current_holder"] not in st.session_state["players"]:
+            if st.session_state.get("current_holder") not in st.session_state.get("players", []):
                 st.error("Error: Current bomb holder is not a valid player. Game state might be corrupted. Please restart.")
             else:
                 with st.form("pass_form"):
@@ -231,8 +215,6 @@ if st.session_state.get("game_started") and st.session_state.get("game_id"):
                     
                     if not available_players_to_pass:
                         st.warning("No other players to pass the bomb to!")
-                        # This state should ideally not be reached if game started with >1 player
-                        # and players aren't removed.
                         pass_button_disabled = True
                         next_player_selected = None
                     else:
@@ -241,7 +223,6 @@ if st.session_state.get("game_started") and st.session_state.get("game_id"):
 
                     ticket_number = st.text_input("Ticket number", key="ticket_input")
                     ticket_date = st.date_input("Ticket creation date", max_value=datetime.now().date(), key="ticket_date_input")
-
                     submitted_pass_bomb = st.form_submit_button("Pass This Bomb!", disabled=pass_button_disabled)
 
                     if submitted_pass_bomb and next_player_selected:
@@ -256,21 +237,20 @@ if st.session_state.get("game_started") and st.session_state.get("game_id"):
                         st.session_state["current_holder"] = next_player_selected
                         save_to_drive(st.session_state["game_id"], st.session_state)
                         st.success(f"Ticket was {days_ticket_age} days old. Bomb passed to {next_player_selected}!")
-                        # time.sleep(0.5) # Brief pause for user to see success message
-                        st.rerun() # Rerun to update display (bomb holder, history)
+                        st.rerun()
 
         st.markdown("---")
         st.subheader("📜 Bomb Pass History")
         if st.session_state.get("history"):
             for record in reversed(st.session_state["history"]):
-                if isinstance(record.get("time"), datetime): # Check if time is datetime
+                if isinstance(record.get("time"), datetime):
                     time_str = record["time"].strftime("%Y-%m-%d %H:%M:%S")
                     if record.get("event") == "Game Started":
                          st.markdown(f"- Game started, bomb initially with `{record.get('player', 'N/A')}` at {time_str}")
                     else:
                         st.markdown(f"- `{record.get('from', 'N/A')}` ➡️ `{record.get('to', 'N/A')}` – Ticket: `{record.get('ticket', 'N/A')}`, **{record.get('days_old', 'N/A')}d**, at {time_str}")
-                else: # Fallback for records without proper time
-                    st.markdown(f"- {record}")
+                else:
+                    st.markdown(f"- {record}") # Fallback for potentially old/corrupt records
         else:
             st.caption("No passes yet.")
 
@@ -279,23 +259,33 @@ with st.sidebar:
     st.header("Game Controls")
     if st.session_state.get("game_id"):
         st.markdown(f"Game ID: `{st.session_state['game_id']}`")
-        # Simple copy-to-clipboard for game ID
-        game_url = f"{st.get_option('server.baseUrlPath')}?game_id={st.session_state['game_id']}"
-        st.markdown(f"Share link: `{game_url}` (You might need to manually construct the full URL if not deployed on Streamlit Cloud/Community)")
+        # Constructing a shareable URL (basic example, might need adjustment based on deployment)
+        # For Streamlit Community Cloud, the base URL is usually the app's direct URL.
+        # If running locally, it might be localhost:8501.
+        # This is a best guess; st.get_option('server.baseUrlPath') might not give the full URL.
+        # You might need to manually provide your app's base URL if this isn't working as expected.
+        try:
+            # This gives the path, e.g. / or /my_app/
+            base_path = st.get_option('server.baseUrlPath').rstrip('/')
+            # A common way to get the host (might not work in all environments)
+            host = st.experimental_get_query_params().get("_stcore_host", [None])[0] 
+            if host:
+                 game_url = f"https://{host}{base_path}/?game_id={st.session_state['game_id']}" # Assuming https
+            else: # Fallback or if you know your deployed URL structure
+                 game_url = f"YOUR_APP_BASE_URL/?game_id={st.session_state['game_id']}" # Replace YOUR_APP_BASE_URL
+            st.markdown(f"Share link: `{game_url}`")
+            st.caption("Copy the link above to share. You might need to adjust YOUR_APP_BASE_URL if it's incorrect.")
+
+        except Exception as e:
+            st.caption("Could not generate full share link automatically.")
 
 
     if st.button("🔁 Restart Game / New Game", key="restart_game_button_sidebar"):
-        # Preserve query_params if needed, or clear them
-        # current_gid = st.session_state.get("game_id") # get current game_id before clearing
+        # Reset all known game state keys to their default values
+        for key, default_value in DEFAULT_STATE_KEYS.items():
+            st.session_state[key] = default_value
         
-        # Clear all session state keys to default
-        for key_to_clear in list(st.session_state.keys()):
-            # Be careful not to delete keys Streamlit might use internally if not prefixed
-            if key_to_clear in DEFAULT_STATE_KEYS or key_to_clear not in ('query_params'): # Example, adjust as needed
-                 del st.session_state[key_to_clear]
-        
-        # Reset query params to remove game_id from URL if user wants a truly new game setup screen
-        st.query_params.clear()
+        st.query_params.clear() # Remove game_id from URL
         st.rerun()
 
 # --- Footer ---
@@ -304,5 +294,5 @@ st.markdown("<br><hr><center><sub>Made for ASMPT · Powered by Streamlit & Match
 # --- Live Refresh (if game is active) ---
 if st.session_state.get("game_started") and st.session_state.get("game_id") and isinstance(st.session_state.get("game_end_time"), datetime):
     if st.session_state["game_end_time"] > datetime.now():
-        time.sleep(1) # Refresh interval
+        time.sleep(1)
         st.rerun()
