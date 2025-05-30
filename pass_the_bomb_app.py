@@ -11,7 +11,7 @@ import io
 # --- CONFIG ---
 st.set_page_config(page_title="Pass the Bomb", layout="centered", initial_sidebar_state="collapsed")
 LOGO_PATH = "asmpt_logo.png"
-APP_VERSION = "5.9 Active Refresh" # Updated version
+APP_VERSION = "5.8 Button Key Test" # Updated version
 
 DEFAULT_GAME_DURATIONS = {
     "☕ Short (15 mins)": timedelta(minutes=15),
@@ -134,9 +134,7 @@ def save_to_drive(game_id, current_session_state):
 def load_from_drive(game_id):
     if not game_id: return None
     file_id = find_file(drive_service, f"{game_id}.json", DRIVE_FOLDER_ID)
-    if not file_id: 
-        # st.sidebar.warning(f"Refresh: Game file for {game_id} not found.") # Optional: for debugging refresh
-        return None
+    if not file_id: return None
     req = drive_service.files().get_media(fileId=file_id)
     fh = io.BytesIO()
     downloader = MediaIoBaseDownload(fh, req)
@@ -172,9 +170,7 @@ for k, v_default in DEFAULT_STATE_KEYS.items():
     if k not in st.session_state:
         st.session_state[k] = v_default
 
-# --- Load Existing Game if game_id in URL (for initial join) ---
-# This block is primarily for when a player first opens a game URL.
-# Subsequent refreshes for live updates are handled by the Live Refresh section.
+# --- Load Existing Game if game_id in URL ---
 if not st.session_state.get("game_started"):
     gid_from_url = current_query_params.get("game_id")
     if gid_from_url:
@@ -214,8 +210,9 @@ if not st.session_state.get("game_started"):
     else:
         if st.button("✅ Start Game", key="start_game_button"):
             new_game_id = "".join(random.choices("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", k=8))
-            # Initialize game state directly
             st.session_state["game_id"] = new_game_id
+            st.query_params["game_id"] = new_game_id
+            
             st.session_state["players"] = list(st.session_state["pending_players"])
             st.session_state["pending_players"] = [] 
             st.session_state["current_holder"] = random.choice(st.session_state["players"])
@@ -223,9 +220,8 @@ if not st.session_state.get("game_started"):
             st.session_state["history"] = [{"event": "Game Started", "player": st.session_state["current_holder"], "time": datetime.now()}]
             st.session_state["game_started"] = True
             
-            st.query_params["game_id"] = new_game_id # Set URL query param
             save_to_drive(st.session_state["game_id"], st.session_state) 
-            st.rerun() # Rerun to reflect game start and new URL
+            st.rerun()
 
 # --- Game Play ---
 if st.session_state.get("game_started") and st.session_state.get("game_id"):
@@ -257,9 +253,7 @@ if st.session_state.get("game_started") and st.session_state.get("game_id"):
                 current_players_list_for_form = []
 
             if st.session_state.get("current_holder") not in current_players_list_for_form:
-                # This case might occur briefly if state is updating, or if state is corrupted.
-                st.warning("Waiting for game state to sync or holder is invalid...")
-                # Avoid rendering form if current_holder is not in players to prevent errors
+                st.error("Error: Current bomb holder is not a valid player. Game state might be corrupted. Please restart.")
             else:
                 with st.form("pass_form"): 
                     current_bomb_holder = st.session_state["current_holder"]
@@ -271,18 +265,13 @@ if st.session_state.get("game_started") and st.session_state.get("game_id"):
                     if not available_players_to_pass:
                         st.warning("No other players to pass the bomb to!")
                     else:
-                        # Check if current_bomb_holder is in the list before trying to make a default selection
-                        # For selectbox, if options are few, it picks the first by default.
-                        default_selection_index = 0 # Or handle if next_player_selected has a previous valid value
-                        next_player_selected = st.selectbox("Pass to:", 
-                                                            available_players_to_pass, 
-                                                            index=default_selection_index, 
-                                                            key="pass_to_select")
+                        next_player_selected = st.selectbox("Pass to:", available_players_to_pass, key="pass_to_select")
                         pass_button_disabled = False
 
                     ticket_number = st.text_input("Ticket number", key="ticket_input")
                     ticket_date_val = st.date_input("Ticket creation date", value="today", max_value=datetime.now().date(), key="ticket_date_input")
                     
+                    # MODIFIED: Removed explicit key from form_submit_button
                     submitted_pass_bomb = st.form_submit_button("Pass This Bomb!", disabled=pass_button_disabled)
 
                     if submitted_pass_bomb:
@@ -328,12 +317,8 @@ with st.sidebar:
         st.caption("To share, copy the current browser URL.")
 
     if st.button("🔁 Restart Game / New Game", key="restart_game_button_sidebar"):
-        # Reset to default state
-        current_gid = st.session_state.get("game_id") # Get current game_id before clearing state
         for key, default_value in DEFAULT_STATE_KEYS.items():
             st.session_state[key] = default_value
-        
-        # Clear query_params to remove game_id from URL, ensuring a fresh setup screen
         st.query_params.clear() 
         st.rerun()
 
@@ -341,40 +326,7 @@ with st.sidebar:
 st.markdown("<br><hr><center><sub>Made for ASMPT · Powered by Streamlit & Matcha</sub></center>", unsafe_allow_html=True)
 
 # --- Live Refresh (if game is active) ---
-if st.session_state.get("game_started") and \
-   st.session_state.get("game_id") and \
-   isinstance(st.session_state.get("game_end_time"), datetime):
-
+if st.session_state.get("game_started") and st.session_state.get("game_id") and isinstance(st.session_state.get("game_end_time"), datetime):
     if st.session_state["game_end_time"] > datetime.now():
-        game_id_to_refresh = st.session_state.get("game_id")
-        
-        if game_id_to_refresh:
-            # Store some current values to check if a significant change occurred
-            prev_holder = st.session_state.get("current_holder")
-            prev_history_len = len(st.session_state.get("history", []))
-
-            loaded_state = load_from_drive(game_id_to_refresh)
-            
-            if loaded_state:
-                current_holder_before_load = st.session_state.get("current_holder")
-                # Apply loaded state for core game keys
-                for k_loaded, v_loaded in loaded_state.items():
-                    if k_loaded in DEFAULT_STATE_KEYS:
-                        st.session_state[k_loaded] = v_loaded
-                
-                # Ensure game_id and game_started are consistent
-                st.session_state["game_id"] = game_id_to_refresh
-                st.session_state["game_started"] = True # Should be true if we are in this refresh block
-
-                # Only rerun if key game data has changed, to avoid interrupting user input
-                # However, timer needs to tick, so always rerun but sleep longer if no change.
-                # For simplicity now, always rerun after a short sleep.
-                # More advanced: check if st.session_state.get('pass_form') exists and has user input
-                # to avoid clobbering it. But forms usually handle their own state well across reruns if inputs are keyed.
-            # else:
-                # Failed to load, current session state remains. Will try again next interval.
-                # st.sidebar.caption(f"Refresh: Could not load {game_id_to_refresh}") # Optional: for debugging
-                
-        # Always sleep and rerun to update timer and reflect any loaded changes
-        time.sleep(1) # Poll every 1 second
+        time.sleep(1) 
         st.rerun()
