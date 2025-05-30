@@ -1,7 +1,9 @@
 streamlit
-google-api-python-client>=2.80.0
-google-auth>=2.17.3
-google-auth-oauthlib>=0.7.0
-google-auth-httplib2>=0.1.0
-requests>=2.25.0 
-# Add other specific dependencies you have
+# To try and force Python 3.11 for Streamlit Cloud deployment
+# (Check Streamlit Cloud docs for the currently supported way to pin Python)
+# One common way, though not universally guaranteed to be picked up over UI settings:
+google-api-python-client
+google-auth-oauthlib
+google-auth-httplib2
+
+# Optional, but recommended for Streamlit Cloud:
