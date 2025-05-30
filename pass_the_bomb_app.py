@@ -11,7 +11,7 @@ import io
 # --- CONFIG ---
 st.set_page_config(page_title="Pass the Bomb", layout="centered", initial_sidebar_state="collapsed")
 LOGO_PATH = "asmpt_logo.png"
-APP_VERSION = "5.9 Active Refresh" # Updated version
+APP_VERSION = "5.8 Button Key Test" # Updated version
 
 DEFAULT_GAME_DURATIONS = {
     "☕ Short (15 mins)": timedelta(minutes=15),
@@ -134,8 +134,7 @@ def save_to_drive(game_id, current_session_state):
 def load_from_drive(game_id):
     if not game_id: return None
     file_id = find_file(drive_service, f"{game_id}.json", DRIVE_FOLDER_ID)
-    if not file_id: 
-        return None
+    if not file_id: return None
     req = drive_service.files().get_media(fileId=file_id)
     fh = io.BytesIO()
     downloader = MediaIoBaseDownload(fh, req)
@@ -144,16 +143,14 @@ def load_from_drive(game_id):
         while not done:
             status, done = downloader.next_chunk()
     except Exception as e:
-        # Log less intrusively for refresh, or allow it to be displayed if it's a persistent error
-        # For now, keeping st.error for significant issues like SSL problems.
-        st.error(f"Error downloading game file: {e}") 
+        st.error(f"Error downloading game file: {e}")
         return None
     fh.seek(0)
     try:
         loaded_data = json.loads(fh.getvalue().decode())
         return _deserialize(loaded_data)
     except json.JSONDecodeError:
-        st.error(f"Error decoding game data for game ID: {game_id}. File might be corrupted.")
+        st.error(f"Error decoding game data for game ID: {game_id}. The file might be corrupted.")
         return None
     except Exception as e:
         st.error(f"An unexpected error occurred while loading game data: {e}")
@@ -173,7 +170,7 @@ for k, v_default in DEFAULT_STATE_KEYS.items():
     if k not in st.session_state:
         st.session_state[k] = v_default
 
-# --- Load Existing Game if game_id in URL (for initial join) ---
+# --- Load Existing Game if game_id in URL ---
 if not st.session_state.get("game_started"):
     gid_from_url = current_query_params.get("game_id")
     if gid_from_url:
@@ -255,8 +252,8 @@ if st.session_state.get("game_started") and st.session_state.get("game_id"):
             if not isinstance(current_players_list_for_form, list): 
                 current_players_list_for_form = []
 
-            if st.session_state.get("current_holder") not in current_players_list_for_form and players_list_valid : # Added players_list_valid to avoid error if players list itself is bad
-                st.warning("Current bomb holder not in player list. Waiting for state to sync or please restart if issue persists.")
+            if st.session_state.get("current_holder") not in current_players_list_for_form:
+                st.error("Error: Current bomb holder is not a valid player. Game state might be corrupted. Please restart.")
             else:
                 with st.form("pass_form"): 
                     current_bomb_holder = st.session_state["current_holder"]
@@ -268,17 +265,14 @@ if st.session_state.get("game_started") and st.session_state.get("game_id"):
                     if not available_players_to_pass:
                         st.warning("No other players to pass the bomb to!")
                     else:
-                        default_selection_index = 0 
-                        next_player_selected = st.selectbox("Pass to:", 
-                                                            available_players_to_pass, 
-                                                            index=default_selection_index, 
-                                                            key="pass_to_select")
+                        next_player_selected = st.selectbox("Pass to:", available_players_to_pass, key="pass_to_select")
                         pass_button_disabled = False
 
                     ticket_number = st.text_input("Ticket number", key="ticket_input")
                     ticket_date_val = st.date_input("Ticket creation date", value="today", max_value=datetime.now().date(), key="ticket_date_input")
                     
-                    submitted_pass_bomb = st.form_submit_button("Pass This Bomb!", disabled=pass_button_disabled) # Key removed previously
+                    # MODIFIED: Removed explicit key from form_submit_button
+                    submitted_pass_bomb = st.form_submit_button("Pass This Bomb!", disabled=pass_button_disabled)
 
                     if submitted_pass_bomb:
                         if next_player_selected and ticket_date_val: 
@@ -293,7 +287,7 @@ if st.session_state.get("game_started") and st.session_state.get("game_id"):
                             st.session_state["current_holder"] = next_player_selected
                             save_to_drive(st.session_state["game_id"], st.session_state) 
                             st.success(f"Ticket was {days_ticket_age} days old. Bomb passed to {next_player_selected}!")
-                            st.rerun() # Rerun immediately after a pass to update current player's view
+                            st.rerun()
                         else:
                             st.warning("Please ensure a player is selected and the date is set.")
 
@@ -332,35 +326,7 @@ with st.sidebar:
 st.markdown("<br><hr><center><sub>Made for ASMPT · Powered by Streamlit & Matcha</sub></center>", unsafe_allow_html=True)
 
 # --- Live Refresh (if game is active) ---
-if st.session_state.get("game_started") and \
-   st.session_state.get("game_id") and \
-   isinstance(st.session_state.get("game_end_time"), datetime):
-
+if st.session_state.get("game_started") and st.session_state.get("game_id") and isinstance(st.session_state.get("game_end_time"), datetime):
     if st.session_state["game_end_time"] > datetime.now():
-        game_id_to_refresh = st.session_state.get("game_id")
-        
-        if game_id_to_refresh:
-            # To prevent issues if a user is actively submitting a form when refresh hits,
-            # we could add a small check, e.g., not refreshing if a form was just submitted.
-            # For now, this direct refresh is simpler.
-            
-            loaded_state = load_from_drive(game_id_to_refresh)
-            
-            if loaded_state:
-                # Apply loaded state for core game keys
-                for k_loaded, v_loaded in loaded_state.items():
-                    if k_loaded in DEFAULT_STATE_KEYS: # Only update defined game state keys
-                        st.session_state[k_loaded] = v_loaded
-                
-                # Ensure critical identifiers remain consistent from the current session's perspective
-                # (though they should match if coming from a consistent save file)
-                st.session_state["game_id"] = game_id_to_refresh
-                st.session_state["game_started"] = True 
-            # else:
-                # Failed to load (e.g., SSL error, file not found). 
-                # The error would be shown by load_from_drive.
-                # We'll still rerun to keep the timer ticking with current state.
-                pass
-                
         time.sleep(1) 
         st.rerun()
