@@ -174,4 +174,150 @@ if drive_service and DRIVE_FOLDER_ID:
                      st.session_state[k] = v
             
             st.session_state.game_id = loaded_state.get("game_id", current_game_id_from_url) # Ensure game_id is set
-            st.session_state.game_started = loaded_state.get("game_started", False) # Ensure game
+            st.session_state.game_started = loaded_state.get("game_started", False) # Ensure game_started is also updated
+            # st.toast(f"Auto-refreshed game: {st.session_state.game_id}", icon="🛰️") # Can be noisy
+        else: 
+            # Game ID in URL but couldn't load (e.g., file deleted, or new invalid ID)
+            # If a game was previously active in this session but now can't be loaded, reset it.
+            if st.session_state.get("game_id") == current_game_id_from_url:
+                st.warning(f"Could not auto-refresh game: {current_game_id_from_url}. It may no longer exist.")
+                st.session_state.game_started = False # Stop the current game in this session
+                # Clear the game_id from URL if it's invalid to prevent reload loops on a bad ID
+                if "game_id" in query_params: del query_params["game_id"]
+                st.session_state.game_id = None 
+            # If it was a different game_id or no game was active, just show setup
+            # (This else branch might not be strictly necessary if the below initialization handles it)
+
+# Initialize all expected session state keys if they haven't been set by a successful load
+# This ensures the app doesn't crash due to missing keys later on.
+for k, dv in DEFAULT_STATE_KEYS.items():
+    if k not in st.session_state:
+        st.session_state[k] = dv
+
+# If after all attempts, there's no valid game_id in session_state (e.g. bad URL param, failed load),
+# ensure game_started is False so setup screen shows.
+if not st.session_state.get("game_id"):
+    st.session_state.game_started = False
+# ---------- END MODIFIED: Manage Game ID and Load State ----------
+
+
+# ---------- Game Setup UI (no changes) ----------
+if not st.session_state.game_started:
+    st.subheader("🎮 Setup New Game")
+    p_col1, p_col2 = st.columns(2)
+    with p_col1:
+        with st.form("add_players_form", clear_on_submit=True):
+            name = st.text_input("Enter player name", key="new_player_name_input")
+            add_p_submitted = st.form_submit_button("➕ Add Player")
+            if add_p_submitted and name.strip():
+                if name.strip() not in st.session_state.pending_players: st.session_state.pending_players.append(name.strip())
+                else: st.warning(f"{name.strip()} already in list.")
+    with p_col2:
+        if st.session_state.pending_players:
+            st.markdown("**Players to Add:**")
+            for i, pn in enumerate(list(st.session_state.pending_players)):
+                rc1,rc2=st.columns([.8,.2]); rc1.markdown(f"- {pn}")
+                if rc2.button("❌",key=f"rm_p_{pn}_{i}",help=f"Remove {pn}"): st.session_state.pending_players.pop(i); st.rerun()
+        else: st.markdown("_No players added._")
+    gd_label = st.selectbox("Game duration:",options=list(DEFAULT_GAME_DURATIONS.keys()),index=1)
+    if len(st.session_state.pending_players) < 2: st.info("Add at least 2 players.")
+    else:
+        if st.button("✅ Start Game",type="primary",use_container_width=True):
+            if not (drive_service and DRIVE_FOLDER_ID): st.error("Google Drive not configured. Cannot start game.")
+            else:
+                if not st.session_state.game_id: 
+                    st.session_state.game_id=generate_game_id()
+                    query_params["game_id"]=st.session_state.game_id
+                st.session_state.players=list(st.session_state.pending_players); st.session_state.pending_players=[]
+                st.session_state.current_holder=random.choice(st.session_state.players)
+                st.session_state.game_end_time=datetime.now()+DEFAULT_GAME_DURATIONS[gd_label]
+                st.session_state.history=[]
+                st.session_state.game_started=True
+                save_successful = save_game_state_to_backend(st.session_state.game_id, st.session_state)
+                if save_successful: st.balloons(); st.rerun()
+                else: st.error("Failed to save initial game state."); st.rerun()
+
+# ---------- Game Interface UI (no changes) ----------
+if st.session_state.game_started:
+    now = datetime.now()
+    time_left_game = (st.session_state.game_end_time - now) if isinstance(st.session_state.game_end_time, datetime) else timedelta(seconds=0)
+    if time_left_game.total_seconds() <= 0:
+        st.error(f"🏁 **GAME OVER!** 🏁"); st.subheader(f"Final bomb holder: **{st.session_state.current_holder}**")
+        st.warning(f"**{st.session_state.current_holder}** buys Matcha Lattes! 🍵"); st.balloons()
+        if drive_service and DRIVE_FOLDER_ID: save_game_state_to_backend(st.session_state.game_id, st.session_state)
+    else: 
+        st.subheader(f"💣 Bomb held by: {st.session_state.current_holder}")
+        st.metric("Game Ends In:", format_timedelta(time_left_game)); st.markdown("---")
+        st.subheader("↪️ Pass the Bomb")
+        st.markdown("_Enter any ticket details to pass the bomb._")
+        can_pass = False; pass_to_options = []
+        if st.session_state.current_holder and st.session_state.current_holder in st.session_state.players and \
+           isinstance(st.session_state.players, list) and len(st.session_state.players) >= 2:
+             pass_to_options = [p for p in st.session_state.players if p != st.session_state.current_holder]
+             if pass_to_options: can_pass = True
+        if not can_pass: st.error("Cannot pass bomb: No valid players to pass to.")
+        else:
+            current_turn_identifier = len(st.session_state.get("history", []))
+            dynamic_form_key = f"pass_form_turn_{current_turn_identifier}_{st.session_state.current_holder}"
+            with st.form(dynamic_form_key):
+                st.markdown(f"You are: **{st.session_state.current_holder}** (current bomb holder)")
+                next_player = st.selectbox("Pass bomb to:", pass_to_options, index=0)
+                ticket_number = st.text_input("Ticket Number/ID:", placeholder="e.g. INC123456")
+                old_ticket_val = st.session_state.get("oldest_ticket_days_to_beat", 0) 
+                d_val = datetime.now().date() - timedelta(days=max(0, int(old_ticket_val)) + 1)
+                ticket_date = st.date_input("Ticket creation date:", max_value=datetime.now().date(), value=d_val)
+                submit_pass_button_pressed = st.form_submit_button("Pass This Bomb!")
+                if submit_pass_button_pressed:
+                    if not (drive_service and DRIVE_FOLDER_ID): st.error("Google Drive not configured.")
+                    elif not ticket_number.strip(): st.warning("⚠️ Enter ticket number.")
+                    else:
+                        days_old = (datetime.now().date() - ticket_date).days
+                        if days_old < 0: st.error("Ticket date cannot be future!")
+                        else:
+                            st.session_state.history.append({
+                                "from": st.session_state.current_holder, "to": next_player,
+                                "ticket": ticket_number, "days_old": days_old, "time": now
+                            })
+                            st.session_state.current_holder = next_player
+                            save_successful = save_game_state_to_backend(st.session_state.game_id, st.session_state)
+                            if save_successful: st.success(f"🎉 Bomb Passed to {next_player}! Ticket: {days_old}d old."); st.rerun()
+                            else: st.error("Failed to save pass. State might be inconsistent."); st.rerun() 
+                                
+    st.markdown("---"); st.subheader("📊 Game Stats & History")
+    with st.expander("📜 Bomb Pass History", expanded=True):
+        if not st.session_state.history: st.caption("_No passes yet._")
+        else:
+            for r in reversed(st.session_state.history):
+                t_val=r.get('time');t_str=t_val.strftime('%Y-%m-%d %H:%M:%S') if isinstance(t_val,datetime) else str(t_val)
+                st.markdown(f"-`{r.get('from','?')}`➡️`{r.get('to','?')}`(Tkt:`{r.get('ticket','?')}`–**{r.get('days_old','?')}d old**) at {t_str}")
+
+# ---------- Sidebar Controls (no changes) ----------
+with st.sidebar:
+    st.header("⚙️ Game Controls")
+    if st.session_state.game_id: st.markdown(f"**Game ID:** `{st.session_state.game_id}`"); st.caption("Share URL to join.")
+    else: st.caption("Start new game or use Game ID URL.")
+    if st.session_state.game_started:
+        st.subheader("Players:")
+        if st.session_state.players:
+            for p in st.session_state.players: st.markdown(f"- **{p}** {'💣' if p==st.session_state.current_holder else ''}")
+        else: st.caption("_No players.")
+        st.markdown("---")
+        if st.button("⚠️ End Game Prematurely",type="secondary"):
+            st.session_state.game_end_time=datetime.now()
+            if drive_service and DRIVE_FOLDER_ID: save_game_state_to_backend(st.session_state.game_id,st.session_state)
+            st.rerun()
+    if st.button("🔄 Start New Setup / Restart App",type="primary"):
+        current_q_params=st.query_params.to_dict()
+        if "game_id" in current_q_params: del current_q_params["game_id"]; st.query_params.from_dict(current_q_params)
+        for key in list(st.session_state.keys()): del st.session_state[key]
+        st.toast("App reset.",icon="🧹"); st.rerun()
+
+# ---------- Footer (no changes) ----------
+st.markdown("<br><hr><center><sub>Made for ASMPT · Powered by Streamlit & Matcha</sub></center>", unsafe_allow_html=True)
+
+# ---------- Live Timer Update (ENABLED) ----------
+if st.session_state.get("game_started", False) and isinstance(st.session_state.get("game_end_time"), datetime):
+    if drive_service and DRIVE_FOLDER_ID: 
+        if st.session_state.game_end_time > datetime.now():
+            time.sleep(1) 
+            st.rerun()
